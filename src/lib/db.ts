@@ -131,16 +131,17 @@ export const db = {
     amount: number,
     paidByMemberId: number,
     splitMemberIds: number[],
-    receiptId?: string
+    receiptId?: string,
+    receiptName?: string
   ) {
     const d1 = await getDb();
     const splitAmount = amount / splitMemberIds.length;
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name) VALUES (?, ?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null)
+      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null, receiptName ?? null)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
@@ -153,6 +154,14 @@ export const db = {
     );
     await d1.batch(stmts);
     return expenseId;
+  },
+
+  async renameReceipt(receiptId: string, name: string) {
+    const d1 = await getDb();
+    await d1
+      .prepare("UPDATE expenses SET receipt_name = ? WHERE receipt_id = ?")
+      .bind(name, receiptId)
+      .run();
   },
 
   async deleteExpense(id: number) {
@@ -249,6 +258,7 @@ export type ExpenseRow = {
   paid_by_color: string;
   created_at: string;
   receipt_id: string | null;
+  receipt_name: string | null;
 };
 
 export type ExpenseSplit = {

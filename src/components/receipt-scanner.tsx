@@ -32,6 +32,7 @@ export function ReceiptScanner({
   const [file, setFile] = useState<File | null>(null);
   const [items, setItems] = useState<ItemWithSplits[] | null>(null);
   const [paidBy, setPaidBy] = useState<number | null>(null);
+  const [receiptName, setReceiptName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isScanning, startScan] = useTransition();
   const [isSubmitting, startSubmit] = useTransition();
@@ -136,7 +137,8 @@ export function ReceiptScanner({
           name: item.name,
           price: item.price,
           splitMemberIds: Array.from(item.splitMemberIds),
-        }))
+        })),
+        receiptName
       );
       reset();
     });
@@ -148,6 +150,7 @@ export function ReceiptScanner({
     setFile(null);
     setItems(null);
     setPaidBy(null);
+    setReceiptName("");
     setError(null);
   }
 
@@ -280,6 +283,20 @@ export function ReceiptScanner({
               ) : (
                 /* Items review phase */
                 <div className="space-y-5">
+                  {/* Receipt name */}
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                      Receipt name (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={receiptName}
+                      onChange={(e) => setReceiptName(e.target.value)}
+                      placeholder="e.g. Grocery store, Dinner..."
+                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                    />
+                  </div>
+
                   {/* Paid by */}
                   <div>
                     <label className="text-sm font-medium text-muted-foreground mb-2 block">

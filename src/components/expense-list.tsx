@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trash2, Receipt, ChevronDown } from "lucide-react";
+import { Trash2, Receipt, ChevronDown, Pencil, Check } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
-import { deleteExpense } from "@/lib/actions";
+import { deleteExpense, renameReceipt } from "@/lib/actions";
 import type { Expense } from "@/lib/db";
 
 type ExpenseEntry =
@@ -81,13 +81,33 @@ function ReceiptGroup({
   index: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [, startRename] = useTransition();
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const paidBy = expenses[0];
+  const receiptId = expenses[0].receipt_id!;
+  const receiptName = expenses[0].receipt_name;
   const date = new Date(expenses[0].created_at + "Z");
   const formattedDate = date.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
   });
+
+  const displayName = receiptName || "Receipt";
+
+  function startEditing(e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditName(receiptName || "");
+    setEditing(true);
+  }
+
+  function saveEdit(e: React.MouseEvent | React.FormEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    setEditing(false);
+    startRename(() => renameReceipt(receiptId, editName, groupId));
+  }
 
   return (
     <motion.div
@@ -97,19 +117,47 @@ function ReceiptGroup({
       className="rounded-xl border border-border bg-card overflow-hidden"
     >
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => !editing && setOpen(!open)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/30 transition-colors"
       >
         <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
           <Receipt className="size-4 text-primary" />
         </div>
         <div className="flex-1 min-w-0 text-left">
-          <p className="font-medium text-sm truncate">
-            Receipt &middot; {expenses.length} {expenses.length === 1 ? "item" : "items"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {paidBy.paid_by_name} paid &middot; {formattedDate}
-          </p>
+          {editing ? (
+            <form onSubmit={saveEdit} className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+              <input
+                autoFocus
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Receipt name..."
+                className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+              />
+              <button type="submit" className="p-1 rounded-lg hover:bg-primary/10 text-primary">
+                <Check className="size-3.5" />
+              </button>
+            </form>
+          ) : (
+            <>
+              <p className="font-medium text-sm truncate flex items-center gap-1.5">
+                {displayName}
+                <span className="text-muted-foreground font-normal">
+                  &middot; {expenses.length} {expenses.length === 1 ? "item" : "items"}
+                </span>
+                <span
+                  onClick={startEditing}
+                  className="inline-flex p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="size-3" />
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {paidBy.paid_by_name} paid &middot; {formattedDate}
+              </p>
+            </>
+          )}
         </div>
         <div className="text-right shrink-0 mr-1">
           <p className="font-heading font-bold tabular-nums">&euro;{total.toFixed(2)}</p>

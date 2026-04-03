@@ -145,13 +145,20 @@ export async function scanReceiptWorkersAI(formData: FormData) {
 export async function createExpensesFromReceipt(
   groupId: number,
   paidByMemberId: number,
-  items: { name: string; price: number; splitMemberIds: number[] }[]
+  items: { name: string; price: number; splitMemberIds: number[] }[],
+  receiptName?: string
 ) {
   const receiptId = crypto.randomUUID();
+  const name = receiptName?.trim() || undefined;
   for (const item of items) {
     if (item.splitMemberIds.length > 0 && item.price > 0) {
-      await db.addExpense(groupId, item.name, item.price, paidByMemberId, item.splitMemberIds, receiptId);
+      await db.addExpense(groupId, item.name, item.price, paidByMemberId, item.splitMemberIds, receiptId, name);
     }
   }
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function renameReceipt(receiptId: string, name: string, groupId: number) {
+  await db.renameReceipt(receiptId, name.trim());
   revalidatePath(`/groups/${groupId}`);
 }
