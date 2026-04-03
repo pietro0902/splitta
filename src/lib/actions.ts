@@ -147,9 +147,10 @@ export async function createExpensesFromReceipt(
   paidByMemberId: number,
   items: { name: string; price: number; splitMemberIds: number[] }[]
 ) {
+  const receiptId = crypto.randomUUID();
   for (const item of items) {
     if (item.splitMemberIds.length > 0 && item.price > 0) {
-      await db.addExpense(groupId, item.name, item.price, paidByMemberId, item.splitMemberIds);
+      await db.addExpense(groupId, item.name, item.price, paidByMemberId, item.splitMemberIds, receiptId);
     }
   }
   revalidatePath(`/groups/${groupId}`);

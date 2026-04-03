@@ -130,16 +130,17 @@ export const db = {
     description: string,
     amount: number,
     paidByMemberId: number,
-    splitMemberIds: number[]
+    splitMemberIds: number[],
+    receiptId?: string
   ) {
     const d1 = await getDb();
     const splitAmount = amount / splitMemberIds.length;
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id) VALUES (?, ?, ?, ?)"
+        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id) VALUES (?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amount, paidByMemberId)
+      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
@@ -247,6 +248,7 @@ export type ExpenseRow = {
   paid_by_name: string;
   paid_by_color: string;
   created_at: string;
+  receipt_id: string | null;
 };
 
 export type ExpenseSplit = {
