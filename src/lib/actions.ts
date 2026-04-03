@@ -77,59 +77,69 @@ export async function scanReceiptClaude(formData: FormData) {
   const apiKey = env.ANTHROPIC_API_KEY;
   if (!apiKey) return { error: "ANTHROPIC_API_KEY not configured", items: [] as ReceiptItem[] };
 
-  const bytes = await file.arrayBuffer();
-  const base64 = Buffer.from(bytes).toString("base64");
-  const mediaType = file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  try {
+    const bytes = await file.arrayBuffer();
+    const base64 = Buffer.from(bytes).toString("base64");
+    const mediaType = file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
-  const anthropic = new Anthropic({ apiKey });
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-          { type: "text", text: OCR_PROMPT },
-        ],
-      },
-    ],
-  });
+    const anthropic = new Anthropic({ apiKey });
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+            { type: "text", text: OCR_PROMPT },
+          ],
+        },
+      ],
+    });
 
-  const text = response.content.find((c) => c.type === "text")?.text ?? "[]";
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return { error: "Could not parse receipt", items: [] as ReceiptItem[] };
+    const text = response.content.find((c) => c.type === "text")?.text ?? "[]";
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return { error: "Could not parse receipt", items: [] as ReceiptItem[] };
 
-  const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
-  return { items };
+    const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
+    return { items };
+  } catch (e) {
+    console.error("Claude OCR error:", e);
+    return { error: "Failed to scan receipt. Please try again.", items: [] as ReceiptItem[] };
+  }
 }
 
 export async function scanReceiptWorkersAI(formData: FormData) {
   const file = formData.get("image") as File;
   if (!file) return { error: "No image provided", items: [] as ReceiptItem[] };
 
-  const { env } = await getCloudflareContext<{ env: CloudflareEnv }>({ async: true });
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  try {
+    const { env } = await getCloudflareContext<{ env: CloudflareEnv }>({ async: true });
+    const bytes = new Uint8Array(await file.arrayBuffer());
 
-  const response = (await env.AI.run(
-    "@cf/meta/llama-3.2-11b-vision-instruct" as keyof AiModels,
-    {
-      messages: [
-        {
-          role: "user",
-          content: OCR_PROMPT,
-        },
-      ],
-      image: [...bytes],
-    } as Record<string, unknown>
-  )) as { response?: string };
+    const response = (await env.AI.run(
+      "@cf/meta/llama-3.2-11b-vision-instruct" as keyof AiModels,
+      {
+        messages: [
+          {
+            role: "user",
+            content: OCR_PROMPT,
+          },
+        ],
+        image: [...bytes],
+      } as Record<string, unknown>
+    )) as { response?: string };
 
-  const text = response?.response ?? "";
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return { error: "Could not parse receipt", items: [] as ReceiptItem[] };
+    const text = response?.response ?? "";
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return { error: "Could not parse receipt", items: [] as ReceiptItem[] };
 
-  const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
-  return { items };
+    const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
+    return { items };
+  } catch (e) {
+    console.error("Workers AI OCR error:", e);
+    return { error: "Failed to scan receipt. Please try again.", items: [] as ReceiptItem[] };
+  }
 }
 
 export async function createExpensesFromReceipt(

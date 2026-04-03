@@ -37,14 +37,43 @@ export function ReceiptScanner({
   const [isSubmitting, startSubmit] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  function compressImage(file: File, maxDimension = 1536, quality = 0.8): Promise<File> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const { width, height } = img;
+        if (width <= maxDimension && height <= maxDimension && file.size <= 1024 * 1024) {
+          resolve(file);
+          return;
+        }
+        const scale = Math.min(maxDimension / width, maxDimension / height, 1);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (blob) => {
+            resolve(new File([blob!], file.name, { type: "image/jpeg" }));
+          },
+          "image/jpeg",
+          quality
+        );
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setFile(f);
     setError(null);
-    const reader = new FileReader();
-    reader.onload = () => setPreview(reader.result as string);
-    reader.readAsDataURL(f);
+    compressImage(f).then((compressed) => {
+      setFile(compressed);
+      const reader = new FileReader();
+      reader.onload = () => setPreview(reader.result as string);
+      reader.readAsDataURL(compressed);
+    });
   }
 
   function handleScan() {
