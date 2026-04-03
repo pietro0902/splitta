@@ -67,7 +67,13 @@ export type ReceiptItem = {
   price: number;
 };
 
-const OCR_PROMPT = `Extract all items and their prices from this receipt. Return ONLY a JSON array, no other text. Format: [{"name": "item name", "price": 1.23}]. Use the exact prices shown. If you cannot read an item clearly, skip it.`;
+const OCR_PROMPT = `Extract all items and their final prices from this receipt.
+Rules:
+- If a discount line follows a product (e.g. "Sconto 40%", "Sconto Carta", or a negative price), apply the discount to that product and return the net price (product price minus discount).
+- Do NOT include discount lines as separate items.
+- Do NOT include totals, subtotals, tax (IVA), or payment lines.
+- Skip items you cannot read clearly.
+Return ONLY a JSON array, no other text. Format: [{"name": "item name", "price": 1.23}].`;
 
 export async function scanReceiptClaude(formData: FormData) {
   const file = formData.get("image") as File;
