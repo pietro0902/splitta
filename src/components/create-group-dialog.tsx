@@ -34,7 +34,7 @@ export function CreateGroupDialog() {
     formData.set("name", name.trim());
     formData.set("emoji", emoji);
     formData.set("members", members.join(","));
-    startTransition(() => createGroup(formData));
+    startTransition(async () => { await createGroup(formData); });
   }
 
   function reset() {

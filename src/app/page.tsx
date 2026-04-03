@@ -4,8 +4,10 @@ import { CreateGroupDialog } from "@/components/create-group-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Receipt } from "lucide-react";
 
-export default function Home() {
-  const groups = db.getGroups();
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const groups = await db.getGroups();
 
   return (
     <div className="relative flex flex-col flex-1">

@@ -44,7 +44,7 @@ export function ExpenseChart({
             ))}
           </Pie>
           <Tooltip
-            formatter={(value: number) => [`€${value.toFixed(2)}`, "Paid"]}
+            formatter={(value) => [`€${Number(value).toFixed(2)}`, "Paid"]}
             contentStyle={{
               borderRadius: "12px",
               border: "1px solid var(--border)",

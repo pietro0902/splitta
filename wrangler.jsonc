@@ -1,0 +1,16 @@
+{
+  "name": "splitta",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "pages_build_output_dir": ".open-next/cloudflare",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "splitta-db",
+      "database_id": "ec7f3439-e09c-46c7-a65c-73cefee84b4c"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  }
+}

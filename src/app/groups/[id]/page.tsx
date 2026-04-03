@@ -1,9 +1,12 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { ArrowLeft, Users, TrendingUp, ArrowLeftRight } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AddExpenseForm } from "@/components/add-expense-form";
+import { ReceiptScanner } from "@/components/receipt-scanner";
 import { ExpenseList } from "@/components/expense-list";
 import { BalanceDisplay } from "@/components/balance-display";
 import { SettlementView } from "@/components/settlement-view";
@@ -12,11 +15,11 @@ import { GroupTabs } from "./tabs";
 
 export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   const { id } = await props.params;
-  const group = db.getGroup(Number(id));
+  const group = await db.getGroup(Number(id));
   if (!group) notFound();
 
-  const balances = db.getBalances(group.id);
-  const settlements = db.getSettlements(group.id);
+  const balances = await db.getBalances(group.id);
+  const settlements = await db.getSettlements(group.id);
 
   return (
     <div className="relative flex flex-col flex-1">
@@ -44,8 +47,11 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-2xl flex-1 px-5 py-6">
-        <div className="mb-6">
-          <AddExpenseForm groupId={group.id} members={group.members} />
+        <div className="mb-6 flex gap-3">
+          <div className="flex-1">
+            <AddExpenseForm groupId={group.id} members={group.members} />
+          </div>
+          <ReceiptScanner groupId={group.id} members={group.members} />
         </div>
 
         {group.expenses.length > 0 && (

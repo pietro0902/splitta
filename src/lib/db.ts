@@ -1,124 +1,91 @@
-import Database from "better-sqlite3";
-import path from "path";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const DB_PATH = path.join(process.cwd(), "tricount.db");
-
-let _db: Database.Database | null = null;
-
-function getDb(): Database.Database {
-  if (!_db) {
-    _db = new Database(DB_PATH);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-    initSchema(_db);
-  }
-  return _db;
+async function getDb(): Promise<D1Database> {
+  const { env } = await getCloudflareContext<{ env: CloudflareEnv }>({ async: true });
+  return env.DB;
 }
 
-function initSchema(db: Database.Database) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS groups (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      emoji TEXT DEFAULT '👥',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS members (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      group_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      color TEXT NOT NULL,
-      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS expenses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      group_id INTEGER NOT NULL,
-      description TEXT NOT NULL,
-      amount REAL NOT NULL,
-      paid_by_member_id INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
-      FOREIGN KEY (paid_by_member_id) REFERENCES members(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS expense_splits (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      expense_id INTEGER NOT NULL,
-      member_id INTEGER NOT NULL,
-      amount REAL NOT NULL,
-      FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
-      FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
-    );
-  `);
-}
+const colors = [
+  "#C4572A", "#6B7C3D", "#D4A853", "#4A7C8F", "#8B5E83",
+  "#C47F3A", "#5B8C6A", "#9E5A5A", "#6A7BA2", "#A68B3C",
+];
 
 export const db = {
-  getGroups() {
-    const groups = getDb()
+  async getGroups() {
+    const d1 = await getDb();
+    const { results: groups } = await d1
       .prepare("SELECT * FROM groups ORDER BY created_at DESC")
-      .all() as Group[];
-    return groups.map((g) => ({
-      ...g,
-      members: this.getMembers(g.id),
-      totalExpenses: this.getGroupTotal(g.id),
-    }));
+      .all<Group>();
+
+    const enriched = await Promise.all(
+      groups.map(async (g) => ({
+        ...g,
+        members: await this.getMembers(g.id),
+        totalExpenses: await this.getGroupTotal(g.id),
+      }))
+    );
+    return enriched;
   },
 
-  getGroup(id: number) {
-    const group = getDb()
+  async getGroup(id: number) {
+    const d1 = await getDb();
+    const group = await d1
       .prepare("SELECT * FROM groups WHERE id = ?")
-      .get(id) as Group | undefined;
+      .bind(id)
+      .first<Group>();
     if (!group) return null;
     return {
       ...group,
-      members: this.getMembers(group.id),
-      expenses: this.getExpenses(group.id),
-      totalExpenses: this.getGroupTotal(group.id),
+      members: await this.getMembers(group.id),
+      expenses: await this.getExpenses(group.id),
+      totalExpenses: await this.getGroupTotal(group.id),
     };
   },
 
-  createGroup(name: string, emoji: string, memberNames: string[]) {
-    const colors = [
-      "#C4572A", "#6B7C3D", "#D4A853", "#4A7C8F", "#8B5E83",
-      "#C47F3A", "#5B8C6A", "#9E5A5A", "#6A7BA2", "#A68B3C",
-    ];
-    const txn = getDb().transaction(() => {
-      const result = getDb()
-        .prepare("INSERT INTO groups (name, emoji) VALUES (?, ?)")
-        .run(name, emoji);
-      const groupId = result.lastInsertRowid as number;
-      const insertMember = getDb().prepare(
-        "INSERT INTO members (group_id, name, color) VALUES (?, ?, ?)"
-      );
-      memberNames.forEach((memberName, i) => {
-        insertMember.run(groupId, memberName, colors[i % colors.length]);
-      });
-      return groupId;
-    });
-    return txn();
+  async createGroup(name: string, emoji: string, memberNames: string[]) {
+    const d1 = await getDb();
+    const groupResult = await d1
+      .prepare("INSERT INTO groups (name, emoji) VALUES (?, ?)")
+      .bind(name, emoji)
+      .run();
+    const groupId = groupResult.meta.last_row_id;
+
+    const stmts = memberNames.map((memberName, i) =>
+      d1
+        .prepare("INSERT INTO members (group_id, name, color) VALUES (?, ?, ?)")
+        .bind(groupId, memberName, colors[i % colors.length])
+    );
+    await d1.batch(stmts);
+    return groupId;
   },
 
-  deleteGroup(id: number) {
-    getDb().prepare("DELETE FROM groups WHERE id = ?").run(id);
+  async deleteGroup(id: number) {
+    const d1 = await getDb();
+    await d1.prepare("DELETE FROM groups WHERE id = ?").bind(id).run();
   },
 
-  getMembers(groupId: number) {
-    return getDb()
+  async getMembers(groupId: number) {
+    const d1 = await getDb();
+    const { results } = await d1
       .prepare("SELECT * FROM members WHERE group_id = ?")
-      .all(groupId) as Member[];
+      .bind(groupId)
+      .all<Member>();
+    return results;
   },
 
-  addMember(groupId: number, name: string, color: string) {
-    const result = getDb()
+  async addMember(groupId: number, name: string, color: string) {
+    const d1 = await getDb();
+    const result = await d1
       .prepare("INSERT INTO members (group_id, name, color) VALUES (?, ?, ?)")
-      .run(groupId, name, color);
-    return result.lastInsertRowid as number;
+      .bind(groupId, name, color)
+      .run();
+    return result.meta.last_row_id;
   },
 
-  getExpenses(groupId: number) {
-    const expenses = getDb()
+  async getExpenses(groupId: number) {
+    const d1 = await getDb();
+    // Single query with JOIN to avoid N+1
+    const { results: expenses } = await d1
       .prepare(
         `SELECT e.*, m.name as paid_by_name, m.color as paid_by_color
          FROM expenses e
@@ -126,66 +93,86 @@ export const db = {
          WHERE e.group_id = ?
          ORDER BY e.created_at DESC`
       )
-      .all(groupId) as ExpenseRow[];
-    return expenses.map((e) => ({
-      ...e,
-      splits: this.getExpenseSplits(e.id),
-    }));
-  },
+      .bind(groupId)
+      .all<ExpenseRow>();
 
-  getExpenseSplits(expenseId: number) {
-    return getDb()
+    if (expenses.length === 0) return [];
+
+    // Fetch all splits for all expenses in this group in one query
+    const expenseIds = expenses.map((e) => e.id);
+    const placeholders = expenseIds.map(() => "?").join(",");
+    const { results: allSplits } = await d1
       .prepare(
         `SELECT es.*, m.name as member_name, m.color as member_color
          FROM expense_splits es
          JOIN members m ON es.member_id = m.id
-         WHERE es.expense_id = ?`
+         WHERE es.expense_id IN (${placeholders})`
       )
-      .all(expenseId) as ExpenseSplit[];
+      .bind(...expenseIds)
+      .all<ExpenseSplit>();
+
+    // Group splits by expense_id
+    const splitsByExpense = new Map<number, ExpenseSplit[]>();
+    for (const split of allSplits) {
+      const arr = splitsByExpense.get(split.expense_id) || [];
+      arr.push(split);
+      splitsByExpense.set(split.expense_id, arr);
+    }
+
+    return expenses.map((e) => ({
+      ...e,
+      splits: splitsByExpense.get(e.id) || [],
+    }));
   },
 
-  addExpense(
+  async addExpense(
     groupId: number,
     description: string,
     amount: number,
     paidByMemberId: number,
     splitMemberIds: number[]
   ) {
+    const d1 = await getDb();
     const splitAmount = amount / splitMemberIds.length;
-    const txn = getDb().transaction(() => {
-      const result = getDb()
+
+    const expenseResult = await d1
+      .prepare(
+        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id) VALUES (?, ?, ?, ?)"
+      )
+      .bind(groupId, description, amount, paidByMemberId)
+      .run();
+    const expenseId = expenseResult.meta.last_row_id;
+
+    const stmts = splitMemberIds.map((memberId) =>
+      d1
         .prepare(
-          "INSERT INTO expenses (group_id, description, amount, paid_by_member_id) VALUES (?, ?, ?, ?)"
+          "INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)"
         )
-        .run(groupId, description, amount, paidByMemberId);
-      const expenseId = result.lastInsertRowid as number;
-      const insertSplit = getDb().prepare(
-        "INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)"
-      );
-      splitMemberIds.forEach((memberId) => {
-        insertSplit.run(expenseId, memberId, splitAmount);
-      });
-      return expenseId;
-    });
-    return txn();
+        .bind(expenseId, memberId, splitAmount)
+    );
+    await d1.batch(stmts);
+    return expenseId;
   },
 
-  deleteExpense(id: number) {
-    getDb().prepare("DELETE FROM expenses WHERE id = ?").run(id);
+  async deleteExpense(id: number) {
+    const d1 = await getDb();
+    await d1.prepare("DELETE FROM expenses WHERE id = ?").bind(id).run();
   },
 
-  getGroupTotal(groupId: number) {
-    const result = getDb()
+  async getGroupTotal(groupId: number) {
+    const d1 = await getDb();
+    const result = await d1
       .prepare(
         "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE group_id = ?"
       )
-      .get(groupId) as { total: number };
-    return result.total;
+      .bind(groupId)
+      .first<{ total: number }>();
+    return result?.total ?? 0;
   },
 
-  getBalances(groupId: number) {
-    const members = this.getMembers(groupId);
-    const expenses = this.getExpenses(groupId);
+  async getBalances(groupId: number) {
+    const members = await this.getMembers(groupId);
+    const expenses = await this.getExpenses(groupId);
 
     const balances: Record<number, number> = {};
     members.forEach((m) => (balances[m.id] = 0));
@@ -203,8 +190,8 @@ export const db = {
     }));
   },
 
-  getSettlements(groupId: number) {
-    const balanceData = this.getBalances(groupId);
+  async getSettlements(groupId: number) {
+    const balanceData = await this.getBalances(groupId);
     const debtors: { member: Member; amount: number }[] = [];
     const creditors: { member: Member; amount: number }[] = [];
 
