@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 import Link from "next/link";
-import { ArrowLeft, Users, TrendingUp, ArrowLeftRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ShareButton } from "@/components/share-button";
 import { AddExpenseForm } from "@/components/add-expense-form";
@@ -12,6 +12,7 @@ import { ExpenseList } from "@/components/expense-list";
 import { BalanceDisplay } from "@/components/balance-display";
 import { SettlementView } from "@/components/settlement-view";
 import { AnalyticsView } from "@/components/analytics-view";
+import { ShoppingList } from "@/components/shopping-list";
 import { AutoClaimGroup } from "@/components/auto-claim-group";
 import { GroupTabs } from "./tabs";
 
@@ -20,8 +21,14 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   const group = await db.getGroup(Number(id));
   if (!group) notFound();
 
-  const balances = await db.getBalances(group.id);
-  const settlements = await db.getSettlements(group.id);
+  const [balances, settlements, settlementRecords, shoppingItems] = await Promise.all([
+    db.getBalances(group.id),
+    db.getSettlements(group.id),
+    db.getSettlementRecords(group.id),
+    db.getShoppingItems(group.id),
+  ]);
+
+  const uncheckedShoppingCount = shoppingItems.filter((i) => !i.checked).length;
 
   return (
     <div className="relative flex flex-col flex-1">
@@ -65,9 +72,19 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
             <ExpenseList expenses={group.expenses} groupId={group.id} members={group.members} />
           }
           balancesTab={<BalanceDisplay balances={balances} />}
-          settlementsTab={<SettlementView settlements={settlements} />}
+          settlementsTab={
+            <SettlementView
+              settlements={settlements}
+              settlementRecords={settlementRecords}
+              groupId={group.id}
+            />
+          }
+          shoppingTab={
+            <ShoppingList items={shoppingItems} groupId={group.id} members={group.members} />
+          }
           analyticsTab={<AnalyticsView expenses={group.expenses} members={group.members} />}
           expenseCount={group.expenses.length}
+          shoppingCount={uncheckedShoppingCount}
         />
       </main>
     </div>

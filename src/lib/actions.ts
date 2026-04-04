@@ -36,12 +36,13 @@ export async function addExpense(formData: FormData) {
     .split(",")
     .map(Number)
     .filter(Boolean);
+  const category = (formData.get("category") as string) || undefined;
 
   if (!description || !amount || !paidByMemberId || splitMemberIds.length === 0) {
     return { error: "All fields are required" };
   }
 
-  await db.addExpense(groupId, description, amount, paidByMemberId, splitMemberIds);
+  await db.addExpense(groupId, description, amount, paidByMemberId, splitMemberIds, undefined, undefined, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -51,12 +52,13 @@ export async function updateExpense(
   description: string,
   amount: number,
   paidByMemberId: number,
-  splitMemberIds: number[]
+  splitMemberIds: number[],
+  category?: string
 ) {
   if (!description || !amount || !paidByMemberId || splitMemberIds.length === 0) {
     return { error: "All fields are required" };
   }
-  await db.updateExpense(expenseId, description, amount, paidByMemberId, splitMemberIds);
+  await db.updateExpense(expenseId, description, amount, paidByMemberId, splitMemberIds, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -154,4 +156,43 @@ export async function renameReceipt(receiptId: string, name: string, groupId: nu
 
 export async function getInviteToken(groupId: number) {
   return db.ensureInviteToken(groupId);
+}
+
+// Settlement records
+export async function recordSettlement(groupId: number, fromMemberId: number, toMemberId: number, amount: number) {
+  await db.recordSettlement(groupId, fromMemberId, toMemberId, amount);
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function deleteSettlementRecord(id: number, groupId: number) {
+  await db.deleteSettlementRecord(id);
+  revalidatePath(`/groups/${groupId}`);
+}
+
+// Shopping list
+export async function addShoppingItem(formData: FormData) {
+  const groupId = Number(formData.get("groupId"));
+  const name = formData.get("name") as string;
+  const quantity = (formData.get("quantity") as string) || null;
+  const addedByMemberId = formData.get("addedByMemberId") ? Number(formData.get("addedByMemberId")) : null;
+
+  if (!name) return { error: "Name is required" };
+
+  await db.addShoppingItem(groupId, name, quantity, addedByMemberId);
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function toggleShoppingItem(id: number, checked: boolean, groupId: number) {
+  await db.toggleShoppingItem(id, checked);
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function deleteShoppingItem(id: number, groupId: number) {
+  await db.deleteShoppingItem(id);
+  revalidatePath(`/groups/${groupId}`);
+}
+
+export async function clearCheckedShoppingItems(groupId: number) {
+  await db.clearCheckedShoppingItems(groupId);
+  revalidatePath(`/groups/${groupId}`);
 }

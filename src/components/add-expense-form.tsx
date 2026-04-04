@@ -6,6 +6,7 @@ import { Plus, X, Receipt } from "lucide-react";
 import { addExpense } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
+import { EXPENSE_CATEGORIES } from "@/lib/db";
 import type { Member } from "@/lib/db";
 
 export function AddExpenseForm({
@@ -20,6 +21,7 @@ export function AddExpenseForm({
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState<number | null>(null);
   const [splitWith, setSplitWith] = useState<Set<number>>(new Set(members.map((m) => m.id)));
+  const [category, setCategory] = useState<string>("");
   const [isPending, startTransition] = useTransition();
 
   function toggleSplit(id: number) {
@@ -37,6 +39,7 @@ export function AddExpenseForm({
     formData.set("amount", amount);
     formData.set("paidByMemberId", String(paidBy));
     formData.set("splitMemberIds", Array.from(splitWith).join(","));
+    if (category) formData.set("category", category);
     startTransition(async () => {
       await addExpense(formData);
       reset();
@@ -48,6 +51,7 @@ export function AddExpenseForm({
     setAmount("");
     setPaidBy(null);
     setSplitWith(new Set(members.map((m) => m.id)));
+    setCategory("");
     setOpen(false);
   }
 
@@ -111,6 +115,27 @@ export function AddExpenseForm({
                     onChange={(e) => setAmount(e.target.value)}
                     className="w-full rounded-xl border border-border bg-background pl-10 pr-4 py-3 text-2xl font-heading font-bold tabular-nums placeholder:text-muted-foreground/30 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
                   />
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Category</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {EXPENSE_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setCategory(category === cat.id ? "" : cat.id)}
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                          category === cat.id
+                            ? "bg-primary/10 ring-2 ring-primary text-primary"
+                            : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        <span>{cat.emoji}</span>
+                        <span>{cat.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Paid by */}
