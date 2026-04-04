@@ -2,7 +2,6 @@
 
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
@@ -20,7 +19,7 @@ export async function createGroup(formData: FormData) {
   }
 
   const groupId = await db.createGroup(name, emoji, memberNames);
-  redirect(`/groups/${groupId}`);
+  return { groupId };
 }
 
 export async function deleteGroup(groupId: number) {
@@ -136,4 +135,8 @@ export async function createExpensesFromReceipt(
 export async function renameReceipt(receiptId: string, name: string, groupId: number) {
   await db.renameReceipt(receiptId, name.trim());
   revalidatePath(`/groups/${groupId}`);
+}
+
+export async function getInviteToken(groupId: number) {
+  return db.ensureInviteToken(groupId);
 }

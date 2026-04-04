@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { ArrowLeft, Users, TrendingUp, ArrowLeftRight } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ShareButton } from "@/components/share-button";
 import { AddExpenseForm } from "@/components/add-expense-form";
 import { ReceiptScanner } from "@/components/receipt-scanner";
 import { ExpenseList } from "@/components/expense-list";
@@ -42,7 +43,10 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
               </p>
             </div>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ShareButton groupId={group.id} inviteToken={group.invite_token} />
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 

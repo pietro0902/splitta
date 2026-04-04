@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Trash2 } from "lucide-react";
 import { MemberAvatarStack } from "@/components/member-avatar";
 import { deleteGroup } from "@/lib/actions";
+import { removeGroupId } from "@/lib/local-groups";
 import { useTransition } from "react";
 import type { GroupSummary } from "@/lib/db";
 
@@ -36,6 +37,7 @@ export function GroupCard({ group, index }: { group: GroupSummary; index: number
                 e.preventDefault();
                 e.stopPropagation();
                 if (confirm("Delete this group?")) {
+                  removeGroupId(group.id);
                   startTransition(() => deleteGroup(group.id));
                 }
               }}

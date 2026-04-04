@@ -44,9 +44,10 @@ export const db = {
 
   async createGroup(name: string, emoji: string, memberNames: string[]) {
     const d1 = await getDb();
+    const inviteToken = crypto.randomUUID();
     const groupResult = await d1
-      .prepare("INSERT INTO groups (name, emoji) VALUES (?, ?)")
-      .bind(name, emoji)
+      .prepare("INSERT INTO groups (name, emoji, invite_token) VALUES (?, ?, ?)")
+      .bind(name, emoji, inviteToken)
       .run();
     const groupId = groupResult.meta.last_row_id;
 
@@ -232,12 +233,42 @@ export const db = {
     }
     return settlements;
   },
+
+  async getGroupByToken(token: string) {
+    const d1 = await getDb();
+    const group = await d1
+      .prepare("SELECT * FROM groups WHERE invite_token = ?")
+      .bind(token)
+      .first<Group>();
+    if (!group) return null;
+    return {
+      ...group,
+      members: await this.getMembers(group.id),
+    };
+  },
+
+  async ensureInviteToken(groupId: number) {
+    const d1 = await getDb();
+    const group = await d1
+      .prepare("SELECT invite_token FROM groups WHERE id = ?")
+      .bind(groupId)
+      .first<{ invite_token: string | null }>();
+    if (group?.invite_token) return group.invite_token;
+
+    const token = crypto.randomUUID();
+    await d1
+      .prepare("UPDATE groups SET invite_token = ? WHERE id = ?")
+      .bind(token, groupId)
+      .run();
+    return token;
+  },
 };
 
 export type Group = {
   id: number;
   name: string;
   emoji: string;
+  invite_token: string | null;
   created_at: string;
 };
 

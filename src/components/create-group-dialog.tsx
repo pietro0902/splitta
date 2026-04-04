@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, X, Users, Sparkles } from "lucide-react";
 import { createGroup } from "@/lib/actions";
+import { addGroupId } from "@/lib/local-groups";
 import { Button } from "@/components/ui/button";
 
 const EMOJIS = ["👥", "🏠", "✈️", "🍕", "🎉", "💼", "🏖️", "🎵", "🚗", "🛒"];
 
 export function CreateGroupDialog() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [emoji, setEmoji] = useState("👥");
@@ -34,7 +37,13 @@ export function CreateGroupDialog() {
     formData.set("name", name.trim());
     formData.set("emoji", emoji);
     formData.set("members", members.join(","));
-    startTransition(async () => { await createGroup(formData); });
+    startTransition(async () => {
+      const result = await createGroup(formData);
+      if (result && "groupId" in result && result.groupId) {
+        addGroupId(result.groupId);
+        router.push(`/groups/${result.groupId}`);
+      }
+    });
   }
 
   function reset() {

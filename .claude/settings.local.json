@@ -15,7 +15,17 @@
       "Bash(export PATH=\"/c/Program Files/GitHub CLI:$PATH\")",
       "Bash(gh auth:*)",
       "Bash(npx wrangler:*)",
-      "Bash(npx:*)"
+      "Bash(npx:*)",
+      "Bash(git push:*)",
+      "Bash(wmic logicaldisk:*)",
+      "Bash(taskkill //F //IM wrangler.exe)",
+      "Bash(taskkill //F //IM workerd.exe)",
+      "Bash(rm -rf .next .open-next)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(curl -s http://127.0.0.1:8788)",
+      "WebSearch",
+      "Bash(rm -rf .next)",
+      "Bash(rm -rf .open-next/server-functions .open-next/cache .open-next/middleware .open-next/cloudflare .open-next/worker.js .open-next/.build)"
     ]
   }
 }
