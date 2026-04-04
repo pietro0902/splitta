@@ -109,9 +109,10 @@ export async function scanReceiptClaude(formData: FormData) {
 
     const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
     return { items };
-  } catch (e) {
-    console.error("Claude OCR error:", e);
-    return { error: "Failed to scan receipt. Please try again.", items: [] as ReceiptItem[] };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("Claude OCR error:", msg, e);
+    return { error: `Scan failed: ${msg}`, items: [] as ReceiptItem[] };
   }
 }
 
@@ -142,9 +143,10 @@ export async function scanReceiptWorkersAI(formData: FormData) {
 
     const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
     return { items };
-  } catch (e) {
-    console.error("Workers AI OCR error:", e);
-    return { error: "Failed to scan receipt. Please try again.", items: [] as ReceiptItem[] };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("Workers AI OCR error:", msg, e);
+    return { error: `Scan failed: ${msg}`, items: [] as ReceiptItem[] };
   }
 }
 
