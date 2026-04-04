@@ -2,18 +2,15 @@
 
 import { useState, useTransition, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Camera, X, Sparkles, Cpu, Loader2 } from "lucide-react";
+import { Camera, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
 import {
   scanReceiptClaude,
-  scanReceiptWorkersAI,
   createExpensesFromReceipt,
 } from "@/lib/actions";
 import type { ReceiptItem } from "@/lib/actions";
 import type { Member } from "@/lib/db";
-
-type Engine = "claude" | "workers-ai";
 
 type ItemWithSplits = ReceiptItem & {
   splitMemberIds: Set<number>;
@@ -27,7 +24,6 @@ export function ReceiptScanner({
   members: Member[];
 }) {
   const [open, setOpen] = useState(false);
-  const [engine, setEngine] = useState<Engine>("claude");
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [items, setItems] = useState<ItemWithSplits[] | null>(null);
@@ -83,8 +79,7 @@ export function ReceiptScanner({
     formData.set("image", file);
 
     startScan(async () => {
-      const action = engine === "claude" ? scanReceiptClaude : scanReceiptWorkersAI;
-      const result = await action(formData);
+      const result = await scanReceiptClaude(formData);
       if (result.error) {
         setError(result.error);
       } else {
@@ -196,32 +191,6 @@ export function ReceiptScanner({
 
               {!items ? (
                 <div className="space-y-5">
-                  {/* Engine toggle */}
-                  <div className="flex rounded-xl bg-muted/50 p-1">
-                    <button
-                      onClick={() => setEngine("claude")}
-                      className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                        engine === "claude"
-                          ? "bg-card shadow-sm text-primary"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <Sparkles className="size-3.5" />
-                      Claude Vision
-                    </button>
-                    <button
-                      onClick={() => setEngine("workers-ai")}
-                      className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                        engine === "workers-ai"
-                          ? "bg-card shadow-sm text-primary"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <Cpu className="size-3.5" />
-                      Workers AI
-                    </button>
-                  </div>
-
                   {/* Upload area */}
                   <input
                     ref={fileRef}

@@ -116,39 +116,6 @@ export async function scanReceiptClaude(formData: FormData) {
   }
 }
 
-export async function scanReceiptWorkersAI(formData: FormData) {
-  const file = formData.get("image") as File;
-  if (!file) return { error: "No image provided", items: [] as ReceiptItem[] };
-
-  try {
-    const { env } = await getCloudflareContext<{ env: CloudflareEnv }>({ async: true });
-    const bytes = new Uint8Array(await file.arrayBuffer());
-
-    const response = (await env.AI.run(
-      "@cf/meta/llama-3.2-11b-vision-instruct" as keyof AiModels,
-      {
-        messages: [
-          {
-            role: "user",
-            content: OCR_PROMPT,
-          },
-        ],
-        image: [...bytes],
-      } as Record<string, unknown>
-    )) as { response?: string };
-
-    const text = response?.response ?? "";
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return { error: "Could not parse receipt", items: [] as ReceiptItem[] };
-
-    const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
-    return { items };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("Workers AI OCR error:", msg, e);
-    return { error: `Scan failed: ${msg}`, items: [] as ReceiptItem[] };
-  }
-}
 
 export async function createExpensesFromReceipt(
   groupId: number,
