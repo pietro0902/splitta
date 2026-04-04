@@ -12,6 +12,7 @@ import { ExpenseList } from "@/components/expense-list";
 import { BalanceDisplay } from "@/components/balance-display";
 import { SettlementView } from "@/components/settlement-view";
 import { ExpenseChart } from "@/components/expense-chart";
+import { AutoClaimGroup } from "@/components/auto-claim-group";
 import { GroupTabs } from "./tabs";
 
 export default async function GroupPage(props: PageProps<"/groups/[id]">) {
@@ -24,6 +25,7 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
 
   return (
     <div className="relative flex flex-col flex-1">
+      <AutoClaimGroup groupId={group.id} />
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="mx-auto max-w-2xl flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-3">
