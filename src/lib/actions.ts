@@ -45,6 +45,21 @@ export async function addExpense(formData: FormData) {
   revalidatePath(`/groups/${groupId}`);
 }
 
+export async function updateExpense(
+  expenseId: number,
+  groupId: number,
+  description: string,
+  amount: number,
+  paidByMemberId: number,
+  splitMemberIds: number[]
+) {
+  if (!description || !amount || !paidByMemberId || splitMemberIds.length === 0) {
+    return { error: "All fields are required" };
+  }
+  await db.updateExpense(expenseId, description, amount, paidByMemberId, splitMemberIds);
+  revalidatePath(`/groups/${groupId}`);
+}
+
 export async function deleteExpense(expenseId: number, groupId: number) {
   await db.deleteExpense(expenseId);
   revalidatePath(`/groups/${groupId}`);

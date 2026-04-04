@@ -11,7 +11,7 @@ import { ReceiptScanner } from "@/components/receipt-scanner";
 import { ExpenseList } from "@/components/expense-list";
 import { BalanceDisplay } from "@/components/balance-display";
 import { SettlementView } from "@/components/settlement-view";
-import { ExpenseChart } from "@/components/expense-chart";
+import { AnalyticsView } from "@/components/analytics-view";
 import { AutoClaimGroup } from "@/components/auto-claim-group";
 import { GroupTabs } from "./tabs";
 
@@ -60,18 +60,13 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
           <ReceiptScanner groupId={group.id} members={group.members} />
         </div>
 
-        {group.expenses.length > 0 && (
-          <div className="mb-8">
-            <ExpenseChart expenses={group.expenses} members={group.members} />
-          </div>
-        )}
-
         <GroupTabs
           expensesTab={
-            <ExpenseList expenses={group.expenses} groupId={group.id} />
+            <ExpenseList expenses={group.expenses} groupId={group.id} members={group.members} />
           }
           balancesTab={<BalanceDisplay balances={balances} />}
           settlementsTab={<SettlementView settlements={settlements} />}
+          analyticsTab={<AnalyticsView expenses={group.expenses} members={group.members} />}
           expenseCount={group.expenses.length}
         />
       </main>

@@ -165,6 +165,39 @@ export const db = {
       .run();
   },
 
+  async updateExpense(
+    expenseId: number,
+    description: string,
+    amount: number,
+    paidByMemberId: number,
+    splitMemberIds: number[]
+  ) {
+    const d1 = await getDb();
+    const splitAmount = amount / splitMemberIds.length;
+
+    await d1
+      .prepare(
+        "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ? WHERE id = ?"
+      )
+      .bind(description, amount, paidByMemberId, expenseId)
+      .run();
+
+    // Delete old splits and insert new ones
+    await d1
+      .prepare("DELETE FROM expense_splits WHERE expense_id = ?")
+      .bind(expenseId)
+      .run();
+
+    const stmts = splitMemberIds.map((memberId) =>
+      d1
+        .prepare(
+          "INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)"
+        )
+        .bind(expenseId, memberId, splitAmount)
+    );
+    await d1.batch(stmts);
+  },
+
   async deleteExpense(id: number) {
     const d1 = await getDb();
     await d1.prepare("DELETE FROM expenses WHERE id = ?").bind(id).run();

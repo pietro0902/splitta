@@ -157,10 +157,10 @@ export function ReceiptScanner({
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-2xl bg-card border border-border px-5 py-4 font-semibold hover:bg-accent/50 transition-colors"
+        className="flex items-center justify-center gap-2 rounded-2xl bg-card border border-border px-4 py-4 font-semibold hover:bg-accent/50 transition-colors whitespace-nowrap"
       >
-        <Camera className="size-5" />
-        Scan Receipt
+        <Camera className="size-5 shrink-0" />
+        <span className="text-sm sm:text-base">Scan</span>
       </motion.button>
 
       <AnimatePresence>

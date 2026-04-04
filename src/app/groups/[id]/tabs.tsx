@@ -2,12 +2,13 @@
 
 import { useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { Receipt, TrendingUp, ArrowLeftRight } from "lucide-react";
+import { Receipt, TrendingUp, ArrowLeftRight, BarChart3 } from "lucide-react";
 
 const TABS = [
   { id: "expenses", label: "Expenses", icon: Receipt },
   { id: "balances", label: "Balances", icon: TrendingUp },
-  { id: "settle", label: "Settle Up", icon: ArrowLeftRight },
+  { id: "settle", label: "Settle", icon: ArrowLeftRight },
+  { id: "stats", label: "Stats", icon: BarChart3 },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -16,11 +17,13 @@ export function GroupTabs({
   expensesTab,
   balancesTab,
   settlementsTab,
+  analyticsTab,
   expenseCount,
 }: {
   expensesTab: ReactNode;
   balancesTab: ReactNode;
   settlementsTab: ReactNode;
+  analyticsTab: ReactNode;
   expenseCount: number;
 }) {
   const [active, setActive] = useState<TabId>("expenses");
@@ -32,7 +35,7 @@ export function GroupTabs({
           <button
             key={tab.id}
             onClick={() => setActive(tab.id)}
-            className="relative flex-1 flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors"
+            className="relative flex-1 flex items-center justify-center gap-1.5 rounded-xl px-2 sm:px-3 py-2.5 text-xs sm:text-sm font-medium transition-colors"
           >
             {active === tab.id && (
               <motion.div
@@ -41,11 +44,11 @@ export function GroupTabs({
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
               />
             )}
-            <span className="relative z-10 flex items-center gap-1.5">
-              <tab.icon className="size-3.5" />
-              {tab.label}
+            <span className="relative z-10 flex items-center gap-1 sm:gap-1.5">
+              <tab.icon className="size-3.5 shrink-0" />
+              <span className="truncate">{tab.label}</span>
               {tab.id === "expenses" && expenseCount > 0 && (
-                <span className="text-[10px] tabular-nums bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
+                <span className="text-[10px] tabular-nums bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">
                   {expenseCount}
                 </span>
               )}
@@ -63,6 +66,7 @@ export function GroupTabs({
         {active === "expenses" && expensesTab}
         {active === "balances" && balancesTab}
         {active === "settle" && settlementsTab}
+        {active === "stats" && analyticsTab}
       </motion.div>
     </div>
   );

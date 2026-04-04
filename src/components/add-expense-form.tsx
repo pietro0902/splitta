@@ -59,10 +59,10 @@ export function AddExpenseForm({
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.97 }}
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3 rounded-2xl bg-primary text-primary-foreground px-5 py-4 font-semibold shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-shadow"
+        className="w-full flex items-center justify-center gap-2 rounded-2xl bg-primary text-primary-foreground px-4 py-4 font-semibold shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-shadow whitespace-nowrap"
       >
-        <Plus className="size-5" />
-        Add Expense
+        <Plus className="size-5 shrink-0" />
+        <span className="text-sm sm:text-base">Add Expense</span>
       </motion.button>
 
       <AnimatePresence>
