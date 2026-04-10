@@ -1,16 +1,16 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any */
 
 // Use dynamic requires to prevent the bundler from tracing these Node.js modules
 const mod = "better-sqlite3";
-const Database = require(mod) as typeof import("better-sqlite3").default;
+const Database = require(mod) as any;
 const fs = require("fs") as typeof import("fs");
 const path = require("path") as typeof import("path");
 
 const DB_PATH = path.join(process.cwd(), ".wrangler", "state", "local.sqlite");
 
-let _db: import("better-sqlite3").Database | null = null;
+let _db: any = null;
 
-function getLocalDb(): import("better-sqlite3").Database {
+function getLocalDb(): any {
   if (_db) return _db;
 
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -37,9 +37,9 @@ function getLocalDb(): import("better-sqlite3").Database {
 class LocalD1PreparedStatement {
   private stmt: string;
   private params: unknown[] = [];
-  private sqliteDb: import("better-sqlite3").Database;
+  private sqliteDb: any;
 
-  constructor(sqliteDb: import("better-sqlite3").Database, sql: string) {
+  constructor(sqliteDb: any, sql: string) {
     this.sqliteDb = sqliteDb;
     this.stmt = sql;
   }
@@ -71,7 +71,7 @@ class LocalD1PreparedStatement {
 }
 
 export class LocalD1Database {
-  private sqliteDb: import("better-sqlite3").Database;
+  private sqliteDb: any;
 
   constructor() {
     this.sqliteDb = getLocalDb();

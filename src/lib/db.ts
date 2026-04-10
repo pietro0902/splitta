@@ -1,4 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import type { Group, Member, ExpenseRow, ExpenseSplit, Expense, Settlement, SettlementRecord, ShoppingItem } from "./db-types";
 
 async function getDb(): Promise<D1Database> {
   if (process.env.NODE_ENV === "development") {
