@@ -35,24 +35,24 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
       <AutoClaimGroup groupId={group.id} />
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="mx-auto max-w-2xl flex items-center justify-between px-5 py-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
             <Link
               href="/"
-              className="flex size-9 items-center justify-center rounded-xl bg-card border border-border hover:bg-accent transition-colors"
+              className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-card border border-border hover:bg-accent transition-colors"
             >
               <ArrowLeft className="size-4" />
             </Link>
-            <div>
-              <h1 className="font-heading text-xl font-normal tracking-tight flex items-center gap-2">
-                <span>{group.emoji}</span>
-                {group.name}
+            <div className="min-w-0">
+              <h1 className="font-heading text-lg sm:text-xl font-normal tracking-tight flex items-center gap-1.5 sm:gap-2">
+                <span className="shrink-0">{group.emoji}</span>
+                <span className="truncate">{group.name}</span>
               </h1>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground truncate">
                 {group.members.length} members &middot; &euro;{group.totalExpenses.toFixed(2)} total
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <ShareButton groupId={group.id} inviteToken={group.invite_token} />
             <ThemeToggle />
           </div>
