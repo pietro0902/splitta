@@ -6,8 +6,8 @@ import { Trash2, Receipt, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { deleteExpense, renameReceipt, updateExpense } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { EXPENSE_CATEGORIES } from "@/lib/db";
-import type { Expense, Member } from "@/lib/db";
+import { EXPENSE_CATEGORIES } from "@/lib/db-types";
+import type { Expense, Member } from "@/lib/db-types";
 
 function getCategoryInfo(categoryId: string | null) {
   if (!categoryId) return null;

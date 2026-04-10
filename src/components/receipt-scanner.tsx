@@ -10,7 +10,7 @@ import {
   createExpensesFromReceipt,
 } from "@/lib/actions";
 import type { ReceiptItem } from "@/lib/actions";
-import type { Member } from "@/lib/db";
+import type { Member } from "@/lib/db-types";
 
 type ItemWithSplits = ReceiptItem & {
   splitMemberIds: Set<number>;

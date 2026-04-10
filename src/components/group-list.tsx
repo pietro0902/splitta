@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { GroupCard } from "@/components/group-card";
 import { CreateGroupDialog } from "@/components/create-group-dialog";
 import { getMyGroupIds } from "@/lib/local-groups";
-import type { GroupSummary } from "@/lib/db";
+import type { GroupSummary } from "@/lib/db-types";
 
 export function GroupList({ groups }: { groups: GroupSummary[] }) {
   const [myIds, setMyIds] = useState<number[] | null>(null);

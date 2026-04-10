@@ -6,8 +6,8 @@ import { Plus, X, Receipt } from "lucide-react";
 import { addExpense } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
-import { EXPENSE_CATEGORIES } from "@/lib/db";
-import type { Member } from "@/lib/db";
+import { EXPENSE_CATEGORIES } from "@/lib/db-types";
+import type { Member } from "@/lib/db-types";
 
 export function AddExpenseForm({
   groupId,

@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { MemberAvatar } from "@/components/member-avatar";
-import type { Member } from "@/lib/db";
+import type { Member } from "@/lib/db-types";
 
 type BalanceData = { member: Member; balance: number };
 

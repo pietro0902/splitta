@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, CheckCircle2, History, Trash2, Check } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { recordSettlement, deleteSettlementRecord } from "@/lib/actions";
-import type { Settlement, SettlementRecord } from "@/lib/db";
+import type { Settlement, SettlementRecord } from "@/lib/db-types";
 
 export function SettlementView({
   settlements,

@@ -7,7 +7,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import type { Member, Expense } from "@/lib/db";
+import type { Member, Expense } from "@/lib/db-types";
 
 export function ExpenseChart({
   expenses,

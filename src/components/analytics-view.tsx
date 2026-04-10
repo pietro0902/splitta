@@ -12,7 +12,7 @@ import {
   Tooltip,
 } from "recharts";
 import { MemberAvatar } from "@/components/member-avatar";
-import type { Member, Expense } from "@/lib/db";
+import type { Member, Expense } from "@/lib/db-types";
 
 export function AnalyticsView({
   expenses,

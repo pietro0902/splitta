@@ -11,7 +11,7 @@ import {
   clearCheckedShoppingItems,
 } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import type { Member, ShoppingItem } from "@/lib/db";
+import type { Member, ShoppingItem } from "@/lib/db-types";
 
 export function ShoppingList({
   items,

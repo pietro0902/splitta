@@ -7,7 +7,7 @@ import { MemberAvatarStack } from "@/components/member-avatar";
 import { deleteGroup } from "@/lib/actions";
 import { removeGroupId } from "@/lib/local-groups";
 import { useTransition } from "react";
-import type { GroupSummary } from "@/lib/db";
+import type { GroupSummary } from "@/lib/db-types";
 
 export function GroupCard({ group, index }: { group: GroupSummary; index: number }) {
   const [isPending, startTransition] = useTransition();
