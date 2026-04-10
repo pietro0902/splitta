@@ -133,16 +133,17 @@ export const db = {
     paidByMemberId: number,
     splitMemberIds: number[],
     receiptId?: string,
-    receiptName?: string
+    receiptName?: string,
+    category?: string
   ) {
     const d1 = await getDb();
     const splitAmount = amount / splitMemberIds.length;
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name, category) VALUES (?, ?, ?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null, receiptName ?? null)
+      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null, receiptName ?? null, category ?? null)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
@@ -170,16 +171,17 @@ export const db = {
     description: string,
     amount: number,
     paidByMemberId: number,
-    splitMemberIds: number[]
+    splitMemberIds: number[],
+    category?: string
   ) {
     const d1 = await getDb();
     const splitAmount = amount / splitMemberIds.length;
 
     await d1
       .prepare(
-        "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ? WHERE id = ?"
+        "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ?, category = ? WHERE id = ?"
       )
-      .bind(description, amount, paidByMemberId, expenseId)
+      .bind(description, amount, paidByMemberId, category ?? null, expenseId)
       .run();
 
     // Delete old splits and insert new ones
@@ -212,26 +214,6 @@ export const db = {
       .bind(groupId)
       .first<{ total: number }>();
     return result?.total ?? 0;
-  },
-
-  async getBalances(groupId: number) {
-    const members = await this.getMembers(groupId);
-    const expenses = await this.getExpenses(groupId);
-
-    const balances: Record<number, number> = {};
-    members.forEach((m) => (balances[m.id] = 0));
-
-    expenses.forEach((expense) => {
-      balances[expense.paid_by_member_id] += expense.amount;
-      expense.splits.forEach((split) => {
-        balances[split.member_id] -= split.amount;
-      });
-    });
-
-    return members.map((m) => ({
-      member: m,
-      balance: Math.round(balances[m.id] * 100) / 100,
-    }));
   },
 
   async getSettlements(groupId: number) {
@@ -295,6 +277,111 @@ export const db = {
       .run();
     return token;
   },
+
+  // Settlement records
+  async recordSettlement(groupId: number, fromMemberId: number, toMemberId: number, amount: number) {
+    const d1 = await getDb();
+    await d1
+      .prepare("INSERT INTO settlements (group_id, from_member_id, to_member_id, amount) VALUES (?, ?, ?, ?)")
+      .bind(groupId, fromMemberId, toMemberId, amount)
+      .run();
+  },
+
+  async getSettlementRecords(groupId: number) {
+    const d1 = await getDb();
+    const { results } = await d1
+      .prepare(
+        `SELECT s.*,
+          mf.name as from_name, mf.color as from_color,
+          mt.name as to_name, mt.color as to_color
+         FROM settlements s
+         JOIN members mf ON s.from_member_id = mf.id
+         JOIN members mt ON s.to_member_id = mt.id
+         WHERE s.group_id = ?
+         ORDER BY s.created_at DESC`
+      )
+      .bind(groupId)
+      .all<SettlementRecord>();
+    return results;
+  },
+
+  async deleteSettlementRecord(id: number) {
+    const d1 = await getDb();
+    await d1.prepare("DELETE FROM settlements WHERE id = ?").bind(id).run();
+  },
+
+  // Updated balances that account for settlement records
+  async getBalances(groupId: number) {
+    const members = await this.getMembers(groupId);
+    const expenses = await this.getExpenses(groupId);
+    const settlementRecords = await this.getSettlementRecords(groupId);
+
+    const balances: Record<number, number> = {};
+    members.forEach((m) => (balances[m.id] = 0));
+
+    expenses.forEach((expense) => {
+      balances[expense.paid_by_member_id] += expense.amount;
+      expense.splits.forEach((split) => {
+        balances[split.member_id] -= split.amount;
+      });
+    });
+
+    // Apply settlements: from pays to, so from's balance goes up, to's goes down
+    settlementRecords.forEach((s) => {
+      balances[s.from_member_id] += s.amount;
+      balances[s.to_member_id] -= s.amount;
+    });
+
+    return members.map((m) => ({
+      member: m,
+      balance: Math.round(balances[m.id] * 100) / 100,
+    }));
+  },
+
+  // Shopping list
+  async getShoppingItems(groupId: number) {
+    const d1 = await getDb();
+    const { results } = await d1
+      .prepare(
+        `SELECT si.*, m.name as added_by_name, m.color as added_by_color
+         FROM shopping_items si
+         LEFT JOIN members m ON si.added_by_member_id = m.id
+         WHERE si.group_id = ?
+         ORDER BY si.checked ASC, si.created_at DESC`
+      )
+      .bind(groupId)
+      .all<ShoppingItem>();
+    return results;
+  },
+
+  async addShoppingItem(groupId: number, name: string, quantity: string | null, addedByMemberId: number | null) {
+    const d1 = await getDb();
+    await d1
+      .prepare("INSERT INTO shopping_items (group_id, name, quantity, added_by_member_id) VALUES (?, ?, ?, ?)")
+      .bind(groupId, name, quantity, addedByMemberId)
+      .run();
+  },
+
+  async toggleShoppingItem(id: number, checked: boolean) {
+    const d1 = await getDb();
+    await d1
+      .prepare("UPDATE shopping_items SET checked = ? WHERE id = ?")
+      .bind(checked ? 1 : 0, id)
+      .run();
+  },
+
+  async deleteShoppingItem(id: number) {
+    const d1 = await getDb();
+    await d1.prepare("DELETE FROM shopping_items WHERE id = ?").bind(id).run();
+  },
+
+  async clearCheckedShoppingItems(groupId: number) {
+    const d1 = await getDb();
+    await d1
+      .prepare("DELETE FROM shopping_items WHERE group_id = ? AND checked = 1")
+      .bind(groupId)
+      .run();
+  },
 };
 
 export type Group = {
@@ -323,6 +410,7 @@ export type ExpenseRow = {
   created_at: string;
   receipt_id: string | null;
   receipt_name: string | null;
+  category: string | null;
 };
 
 export type ExpenseSplit = {
@@ -352,3 +440,43 @@ export type GroupSummary = Group & {
   members: Member[];
   totalExpenses: number;
 };
+
+export type SettlementRecord = {
+  id: number;
+  group_id: number;
+  from_member_id: number;
+  to_member_id: number;
+  amount: number;
+  created_at: string;
+  from_name: string;
+  from_color: string;
+  to_name: string;
+  to_color: string;
+};
+
+export type ShoppingItem = {
+  id: number;
+  group_id: number;
+  name: string;
+  quantity: string | null;
+  added_by_member_id: number | null;
+  checked: number;
+  created_at: string;
+  added_by_name?: string;
+  added_by_color?: string;
+};
+
+export const EXPENSE_CATEGORIES = [
+  { id: "food", label: "Food", emoji: "🍕" },
+  { id: "groceries", label: "Groceries", emoji: "🛒" },
+  { id: "transport", label: "Transport", emoji: "🚗" },
+  { id: "rent", label: "Rent", emoji: "🏠" },
+  { id: "utilities", label: "Utilities", emoji: "💡" },
+  { id: "entertainment", label: "Entertainment", emoji: "🎬" },
+  { id: "shopping", label: "Shopping", emoji: "🛍️" },
+  { id: "health", label: "Health", emoji: "💊" },
+  { id: "travel", label: "Travel", emoji: "✈️" },
+  { id: "other", label: "Other", emoji: "📦" },
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]["id"];
