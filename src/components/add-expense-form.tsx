@@ -6,6 +6,8 @@ import { Plus, X, Receipt } from "lucide-react";
 import { addExpense } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
+import { SplitEditor } from "@/components/split-editor";
+import { computeSplits, toNumericWeights, type SplitMode } from "@/lib/splits";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Member } from "@/lib/db-types";
 
@@ -20,9 +22,14 @@ export function AddExpenseForm({
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState<number | null>(null);
+  const [splitMode, setSplitMode] = useState<SplitMode>("equal");
   const [splitWith, setSplitWith] = useState<Set<number>>(new Set(members.map((m) => m.id)));
+  const [splitWeights, setSplitWeights] = useState<Record<number, string>>({});
   const [category, setCategory] = useState<string>("");
   const [isPending, startTransition] = useTransition();
+
+  const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
+  const splitResult = computeSplits(splitMode, Number(amount) || 0, participantIds, toNumericWeights(splitWeights));
 
   function toggleSplit(id: number) {
     const next = new Set(splitWith);
@@ -32,13 +39,14 @@ export function AddExpenseForm({
   }
 
   function handleSubmit() {
-    if (!description || !amount || !paidBy || splitWith.size === 0) return;
+    if (!description || !amount || !paidBy || !splitResult.valid) return;
     const formData = new FormData();
     formData.set("groupId", String(groupId));
     formData.set("description", description);
     formData.set("amount", amount);
     formData.set("paidByMemberId", String(paidBy));
-    formData.set("splitMemberIds", Array.from(splitWith).join(","));
+    formData.set("splitMode", splitMode);
+    formData.set("splits", JSON.stringify(splitResult.splits));
     if (category) formData.set("category", category);
     startTransition(async () => {
       await addExpense(formData);
@@ -50,12 +58,12 @@ export function AddExpenseForm({
     setDescription("");
     setAmount("");
     setPaidBy(null);
+    setSplitMode("equal");
     setSplitWith(new Set(members.map((m) => m.id)));
+    setSplitWeights({});
     setCategory("");
     setOpen(false);
   }
-
-  const splitAmount = splitWith.size > 0 && amount ? Number(amount) / splitWith.size : 0;
 
   return (
     <>
@@ -159,37 +167,21 @@ export function AddExpenseForm({
                   </div>
                 </div>
 
-                {/* Split with */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium text-muted-foreground">Split between</label>
-                    {splitAmount > 0 && (
-                      <span className="text-xs font-medium text-primary">
-                        &euro;{splitAmount.toFixed(2)} each
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {members.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => toggleSplit(m.id)}
-                        className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                          splitWith.has(m.id)
-                            ? "bg-primary/10 ring-2 ring-primary text-primary"
-                            : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        <MemberAvatar name={m.name} color={m.color} size="sm" />
-                        <span className="truncate">{m.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {/* Split */}
+                <SplitEditor
+                  members={members}
+                  mode={splitMode}
+                  onModeChange={setSplitMode}
+                  selected={splitWith}
+                  onToggle={toggleSplit}
+                  weights={splitWeights}
+                  onWeightChange={(id, value) => setSplitWeights((w) => ({ ...w, [id]: value }))}
+                  result={splitResult}
+                />
 
                 <Button
                   onClick={handleSubmit}
-                  disabled={!description || !amount || !paidBy || splitWith.size === 0 || isPending}
+                  disabled={!description || !amount || !paidBy || !splitResult.valid || isPending}
                   className="w-full h-12 rounded-xl text-base font-semibold"
                 >
                   {isPending ? "Adding..." : "Add Expense"}

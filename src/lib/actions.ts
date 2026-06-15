@@ -4,6 +4,12 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { computeSplits, splitsAreValid, SPLIT_MODES, type SplitInput, type SplitMode } from "@/lib/splits";
+
+function parseSplitMode(raw: FormDataEntryValue | null): SplitMode {
+  const value = String(raw ?? "equal");
+  return (SPLIT_MODES.some((m) => m.id === value) ? value : "equal") as SplitMode;
+}
 
 export async function createGroup(formData: FormData) {
   const name = formData.get("name") as string;
@@ -27,22 +33,39 @@ export async function deleteGroup(groupId: number) {
   revalidatePath("/");
 }
 
+function parseSplits(raw: FormDataEntryValue | null): SplitInput[] {
+  try {
+    const parsed = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((s) => ({
+        memberId: Number(s.memberId),
+        amount: Number(s.amount),
+        weight: s.weight === null || s.weight === undefined ? null : Number(s.weight),
+      }))
+      .filter((s) => s.memberId && Number.isFinite(s.amount) && s.amount > 0);
+  } catch {
+    return [];
+  }
+}
+
 export async function addExpense(formData: FormData) {
   const groupId = Number(formData.get("groupId"));
   const description = formData.get("description") as string;
   const amount = Number(formData.get("amount"));
   const paidByMemberId = Number(formData.get("paidByMemberId"));
-  const splitMemberIds = (formData.get("splitMemberIds") as string)
-    .split(",")
-    .map(Number)
-    .filter(Boolean);
+  const splitMode = parseSplitMode(formData.get("splitMode"));
+  const splits = parseSplits(formData.get("splits"));
   const category = (formData.get("category") as string) || undefined;
 
-  if (!description || !amount || !paidByMemberId || splitMemberIds.length === 0) {
+  if (!description || !amount || !paidByMemberId || splits.length === 0) {
     return { error: "All fields are required" };
   }
+  if (!splitsAreValid(amount, splits)) {
+    return { error: "The split does not add up to the total" };
+  }
 
-  await db.addExpense(groupId, description, amount, paidByMemberId, splitMemberIds, undefined, undefined, category);
+  await db.addExpense(groupId, description, amount, paidByMemberId, splits, splitMode, undefined, undefined, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -52,13 +75,17 @@ export async function updateExpense(
   description: string,
   amount: number,
   paidByMemberId: number,
-  splitMemberIds: number[],
+  splits: SplitInput[],
+  splitMode: SplitMode,
   category?: string
 ) {
-  if (!description || !amount || !paidByMemberId || splitMemberIds.length === 0) {
+  if (!description || !amount || !paidByMemberId || splits.length === 0) {
     return { error: "All fields are required" };
   }
-  await db.updateExpense(expenseId, description, amount, paidByMemberId, splitMemberIds, category);
+  if (!splitsAreValid(amount, splits)) {
+    return { error: "The split does not add up to the total" };
+  }
+  await db.updateExpense(expenseId, description, amount, paidByMemberId, splits, splitMode, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -143,7 +170,8 @@ export async function createExpensesFromReceipt(
   const name = receiptName?.trim() || undefined;
   for (const item of items) {
     if (item.splitMemberIds.length > 0 && item.price > 0) {
-      await db.addExpense(groupId, item.name, item.price, paidByMemberId, item.splitMemberIds, receiptId, name);
+      const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
+      await db.addExpense(groupId, item.name, item.price, paidByMemberId, splits, "equal", receiptId, name);
     }
   }
   revalidatePath(`/groups/${groupId}`);

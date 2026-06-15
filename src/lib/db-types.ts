@@ -25,6 +25,7 @@ export type ExpenseRow = {
   receipt_id: string | null;
   receipt_name: string | null;
   category: string | null;
+  split_mode: string;
 };
 
 export type ExpenseSplit = {
@@ -34,6 +35,7 @@ export type ExpenseSplit = {
   member_name: string;
   member_color: string;
   amount: number;
+  weight: number | null;
 };
 
 export type Expense = ExpenseRow & { splits: ExpenseSplit[] };
@@ -94,3 +96,5 @@ export const EXPENSE_CATEGORIES = [
 ] as const;
 
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]["id"];
+
+export type { SplitMode, SplitInput } from "./splits";

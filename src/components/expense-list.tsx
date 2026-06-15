@@ -6,12 +6,36 @@ import { Trash2, Receipt, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { deleteExpense, renameReceipt, updateExpense } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
+import { SplitEditor } from "@/components/split-editor";
+import { computeSplits, toNumericWeights, roundCents, SPLIT_MODES, type SplitMode } from "@/lib/splits";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Expense, Member } from "@/lib/db-types";
 
 function getCategoryInfo(categoryId: string | null) {
   if (!categoryId) return null;
   return EXPENSE_CATEGORIES.find((c) => c.id === categoryId) ?? null;
+}
+
+function initialSplitMode(expense: Expense): SplitMode {
+  return (SPLIT_MODES.some((m) => m.id === expense.split_mode) ? expense.split_mode : "equal") as SplitMode;
+}
+
+// Restore the editor's raw inputs from a saved expense so editing reopens with
+// the same numbers the user typed. Falls back to deriving from owed amounts for
+// rows saved before weights were stored.
+function initialSplitWeights(expense: Expense, mode: SplitMode): Record<number, string> {
+  if (mode === "equal") return {};
+  const weights: Record<number, string> = {};
+  for (const s of expense.splits) {
+    if (mode === "exact") {
+      weights[s.member_id] = String(s.weight ?? roundCents(s.amount));
+    } else if (mode === "percent") {
+      weights[s.member_id] = String(s.weight ?? (expense.amount > 0 ? roundCents((s.amount / expense.amount) * 100) : 0));
+    } else {
+      weights[s.member_id] = String(s.weight ?? 1);
+    }
+  }
+  return weights;
 }
 
 type ExpenseEntry =
@@ -93,11 +117,19 @@ function EditExpenseModal({
   const [description, setDescription] = useState(expense.description);
   const [amount, setAmount] = useState(String(expense.amount));
   const [paidBy, setPaidBy] = useState(expense.paid_by_member_id);
+  const initialMode = initialSplitMode(expense);
+  const [splitMode, setSplitMode] = useState<SplitMode>(initialMode);
   const [splitWith, setSplitWith] = useState<Set<number>>(
     new Set(expense.splits.map((s) => s.member_id))
   );
+  const [splitWeights, setSplitWeights] = useState<Record<number, string>>(
+    initialSplitWeights(expense, initialMode)
+  );
   const [category, setCategory] = useState(expense.category || "");
   const [isPending, startTransition] = useTransition();
+
+  const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
+  const splitResult = computeSplits(splitMode, Number(amount) || 0, participantIds, toNumericWeights(splitWeights));
 
   function toggleSplit(id: number) {
     const next = new Set(splitWith);
@@ -107,7 +139,7 @@ function EditExpenseModal({
   }
 
   function handleSave() {
-    if (!description || !amount || !paidBy || splitWith.size === 0) return;
+    if (!description || !amount || !paidBy || !splitResult.valid) return;
     startTransition(async () => {
       await updateExpense(
         expense.id,
@@ -115,14 +147,13 @@ function EditExpenseModal({
         description,
         Number(amount),
         paidBy,
-        Array.from(splitWith),
+        splitResult.splits,
+        splitMode,
         category || undefined
       );
       onClose();
     });
   }
-
-  const splitAmount = splitWith.size > 0 && amount ? Number(amount) / splitWith.size : 0;
 
   return (
     <motion.div
@@ -210,36 +241,20 @@ function EditExpenseModal({
             </div>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-muted-foreground">Split between</label>
-              {splitAmount > 0 && (
-                <span className="text-xs font-medium text-primary">
-                  &euro;{splitAmount.toFixed(2)} each
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {members.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => toggleSplit(m.id)}
-                  className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                    splitWith.has(m.id)
-                      ? "bg-primary/10 ring-2 ring-primary text-primary"
-                      : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  <MemberAvatar name={m.name} color={m.color} size="sm" />
-                  <span className="truncate">{m.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <SplitEditor
+            members={members}
+            mode={splitMode}
+            onModeChange={setSplitMode}
+            selected={splitWith}
+            onToggle={toggleSplit}
+            weights={splitWeights}
+            onWeightChange={(id, value) => setSplitWeights((w) => ({ ...w, [id]: value }))}
+            result={splitResult}
+          />
 
           <Button
             onClick={handleSave}
-            disabled={!description || !amount || !paidBy || splitWith.size === 0 || isPending}
+            disabled={!description || !amount || !paidBy || !splitResult.valid || isPending}
             className="w-full h-12 rounded-xl text-base font-semibold"
           >
             {isPending ? "Saving..." : "Save Changes"}

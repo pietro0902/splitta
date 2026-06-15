@@ -1,5 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { Group, Member, ExpenseRow, ExpenseSplit, Expense, Settlement, SettlementRecord, ShoppingItem } from "./db-types";
+import type { SplitInput, SplitMode } from "./splits";
 
 async function getDb(): Promise<D1Database> {
   if (process.env.NODE_ENV === "development") {
@@ -136,28 +137,28 @@ export const db = {
     description: string,
     amount: number,
     paidByMemberId: number,
-    splitMemberIds: number[],
+    splits: SplitInput[],
+    splitMode: SplitMode,
     receiptId?: string,
     receiptName?: string,
     category?: string
   ) {
     const d1 = await getDb();
-    const splitAmount = amount / splitMemberIds.length;
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name, category) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null, receiptName ?? null, category ?? null)
+      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null, receiptName ?? null, category ?? null, splitMode)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
-    const stmts = splitMemberIds.map((memberId) =>
+    const stmts = splits.map((s) =>
       d1
         .prepare(
-          "INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)"
+          "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
         )
-        .bind(expenseId, memberId, splitAmount)
+        .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
     );
     await d1.batch(stmts);
     return expenseId;
@@ -176,17 +177,17 @@ export const db = {
     description: string,
     amount: number,
     paidByMemberId: number,
-    splitMemberIds: number[],
+    splits: SplitInput[],
+    splitMode: SplitMode,
     category?: string
   ) {
     const d1 = await getDb();
-    const splitAmount = amount / splitMemberIds.length;
 
     await d1
       .prepare(
-        "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ?, category = ? WHERE id = ?"
+        "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ?, category = ?, split_mode = ? WHERE id = ?"
       )
-      .bind(description, amount, paidByMemberId, category ?? null, expenseId)
+      .bind(description, amount, paidByMemberId, category ?? null, splitMode, expenseId)
       .run();
 
     // Delete old splits and insert new ones
@@ -195,12 +196,12 @@ export const db = {
       .bind(expenseId)
       .run();
 
-    const stmts = splitMemberIds.map((memberId) =>
+    const stmts = splits.map((s) =>
       d1
         .prepare(
-          "INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)"
+          "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
         )
-        .bind(expenseId, memberId, splitAmount)
+        .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
     );
     await d1.batch(stmts);
   },
