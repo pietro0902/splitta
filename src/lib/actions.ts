@@ -182,6 +182,43 @@ export async function renameReceipt(receiptId: string, name: string, groupId: nu
   revalidatePath(`/groups/${groupId}`);
 }
 
+// Full edit of a scanned receipt: name, payer (applied to every line), and each
+// line item (description, price, who it is split between). `originalIds` is the
+// set of expense ids the receipt currently has, so removed lines get deleted.
+// Receipt lines are always split equally; per-line custom splits stay available
+// through the single-expense editor.
+export async function saveReceipt(
+  groupId: number,
+  receiptId: string,
+  receiptName: string,
+  paidByMemberId: number,
+  items: { id?: number; name: string; price: number; splitMemberIds: number[]; category?: string }[],
+  originalIds: number[]
+) {
+  if (!paidByMemberId) return { error: "Select who paid" };
+
+  const valid = items.filter((i) => i.name.trim() && i.price > 0 && i.splitMemberIds.length > 0);
+  if (valid.length === 0) return { error: "Add at least one item" };
+
+  const kept = new Set<number>();
+  for (const item of valid) {
+    const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
+    if (item.id) {
+      await db.updateExpense(item.id, item.name.trim(), item.price, paidByMemberId, splits, "equal", item.category);
+      kept.add(item.id);
+    } else {
+      await db.addExpense(groupId, item.name.trim(), item.price, paidByMemberId, splits, "equal", receiptId, receiptName.trim() || undefined);
+    }
+  }
+
+  for (const id of originalIds) {
+    if (!kept.has(id)) await db.deleteExpense(id);
+  }
+
+  await db.renameReceipt(receiptId, receiptName.trim());
+  revalidatePath(`/groups/${groupId}`);
+}
+
 export async function getInviteToken(groupId: number) {
   return db.ensureInviteToken(groupId);
 }

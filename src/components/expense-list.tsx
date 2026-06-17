@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trash2, Receipt, ChevronDown, Pencil, Check, X } from "lucide-react";
+import { Trash2, Receipt, ChevronDown, Pencil, X, Plus } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
-import { deleteExpense, renameReceipt, updateExpense } from "@/lib/actions";
+import { deleteExpense, updateExpense, saveReceipt } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { SplitEditor } from "@/components/split-editor";
 import { computeSplits, toNumericWeights, roundCents, SPLIT_MODES, type SplitMode } from "@/lib/splits";
@@ -265,6 +265,239 @@ function EditExpenseModal({
   );
 }
 
+type ReceiptLine = {
+  id?: number;
+  name: string;
+  price: string;
+  splitMemberIds: Set<number>;
+  category?: string;
+};
+
+function EditReceiptModal({
+  expenses,
+  groupId,
+  members,
+  onClose,
+}: {
+  expenses: Expense[];
+  groupId: number;
+  members: Member[];
+  onClose: () => void;
+}) {
+  const receiptId = expenses[0].receipt_id!;
+  const originalIds = expenses.map((e) => e.id);
+  const [receiptName, setReceiptName] = useState(expenses[0].receipt_name ?? "");
+  const [paidBy, setPaidBy] = useState<number | null>(expenses[0].paid_by_member_id);
+  const [lines, setLines] = useState<ReceiptLine[]>(() =>
+    expenses.map((e) => ({
+      id: e.id,
+      name: e.description,
+      price: String(e.amount),
+      splitMemberIds: new Set(e.splits.map((s) => s.member_id)),
+      category: e.category ?? undefined,
+    }))
+  );
+  const [isPending, startTransition] = useTransition();
+
+  function updateLine(index: number, field: "name" | "price", value: string) {
+    setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
+  }
+
+  function toggleLineSplit(index: number, memberId: number) {
+    setLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== index) return l;
+        const next = new Set(l.splitMemberIds);
+        if (next.has(memberId)) next.delete(memberId);
+        else next.add(memberId);
+        return { ...l, splitMemberIds: next };
+      })
+    );
+  }
+
+  function removeLine(index: number) {
+    setLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addLine() {
+    setLines((prev) => [
+      ...prev,
+      { name: "", price: "", splitMemberIds: new Set(members.map((m) => m.id)) },
+    ]);
+  }
+
+  const total = lines.reduce((s, l) => s + (Number(l.price) || 0), 0);
+  const canSave =
+    paidBy != null &&
+    lines.some((l) => l.name.trim() && Number(l.price) > 0 && l.splitMemberIds.size > 0);
+
+  function handleSave() {
+    if (!canSave || paidBy == null) return;
+    startTransition(async () => {
+      await saveReceipt(
+        groupId,
+        receiptId,
+        receiptName,
+        paidBy,
+        lines.map((l) => ({
+          id: l.id,
+          name: l.name,
+          price: Number(l.price) || 0,
+          splitMemberIds: Array.from(l.splitMemberIds),
+          category: l.category,
+        })),
+        originalIds
+      );
+      onClose();
+    });
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 100 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 100 }}
+        transition={{ type: "spring", damping: 25, stiffness: 300 }}
+        className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <Receipt className="size-5 text-primary" />
+            <h2 className="font-heading text-xl font-bold">Edit Receipt</h2>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="space-y-5">
+          {/* Receipt name */}
+          <div>
+            <label className="text-sm font-medium text-muted-foreground mb-2 block">Receipt name</label>
+            <input
+              type="text"
+              value={receiptName}
+              onChange={(e) => setReceiptName(e.target.value)}
+              placeholder="e.g. Grocery store, Dinner..."
+              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+            />
+          </div>
+
+          {/* Paid by */}
+          <div>
+            <label className="text-sm font-medium text-muted-foreground mb-2 block">Paid by</label>
+            <div className="grid grid-cols-2 gap-2">
+              {members.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setPaidBy(m.id)}
+                  className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                    paidBy === m.id
+                      ? "bg-primary/10 ring-2 ring-primary text-primary"
+                      : "bg-muted/50 hover:bg-muted text-foreground"
+                  }`}
+                >
+                  <MemberAvatar name={m.name} color={m.color} size="sm" />
+                  <span className="truncate">{m.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Items */}
+          <div>
+            <label className="text-sm font-medium text-muted-foreground mb-2 block">
+              Items ({lines.length})
+            </label>
+            <div className="space-y-3">
+              {lines.map((line, idx) => (
+                <div key={line.id ?? `new-${idx}`} className="rounded-xl border border-border bg-background p-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="text"
+                      value={line.name}
+                      placeholder="Item"
+                      onChange={(e) => updateLine(idx, "name", e.target.value)}
+                      className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                    />
+                    <div className="relative shrink-0">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">
+                        &euro;
+                      </span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={line.price}
+                        placeholder="0.00"
+                        onChange={(e) => updateLine(idx, "price", e.target.value)}
+                        className="w-24 rounded-lg border border-border bg-card pl-7 pr-2 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                      />
+                    </div>
+                    <button
+                      onClick={() => removeLine(idx)}
+                      className="text-muted-foreground hover:text-destructive p-1.5"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+
+                  {/* Split selection per item */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {members.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => toggleLineSplit(idx, m.id)}
+                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                          line.splitMemberIds.has(m.id)
+                            ? "bg-primary/10 ring-1 ring-primary text-primary"
+                            : "bg-muted/50 text-muted-foreground"
+                        }`}
+                      >
+                        <MemberAvatar name={m.name} color={m.color} size="sm" />
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={addLine}
+              className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-sm font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground transition-all"
+            >
+              <Plus className="size-4" />
+              Add item
+            </button>
+          </div>
+
+          {/* Total */}
+          <div className="flex items-center justify-between pt-2 border-t border-border">
+            <span className="text-sm font-medium text-muted-foreground">Total</span>
+            <span className="text-lg font-heading font-bold tabular-nums">&euro;{total.toFixed(2)}</span>
+          </div>
+
+          <Button
+            onClick={handleSave}
+            disabled={!canSave || isPending}
+            className="w-full h-12 rounded-xl text-base font-semibold"
+          >
+            {isPending ? "Saving..." : "Save Changes"}
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function ReceiptGroup({
   expenses,
   groupId,
@@ -277,12 +510,9 @@ function ReceiptGroup({
   index: number;
 }) {
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [, startRename] = useTransition();
+  const [editingReceipt, setEditingReceipt] = useState(false);
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const paidBy = expenses[0];
-  const receiptId = expenses[0].receipt_id!;
   const receiptName = expenses[0].receipt_name;
   const date = new Date(expenses[0].created_at + "Z");
   const formattedDate = date.toLocaleDateString("en-GB", {
@@ -292,17 +522,9 @@ function ReceiptGroup({
 
   const displayName = receiptName || "Receipt";
 
-  function startEditing(e: React.MouseEvent) {
+  function openEditor(e: React.MouseEvent) {
     e.stopPropagation();
-    setEditName(receiptName || "");
-    setEditing(true);
-  }
-
-  function saveEdit(e: React.MouseEvent | React.FormEvent) {
-    e.stopPropagation();
-    e.preventDefault();
-    setEditing(false);
-    startRename(() => renameReceipt(receiptId, editName, groupId));
+    setEditingReceipt(true);
   }
 
   return (
@@ -313,47 +535,28 @@ function ReceiptGroup({
       className="rounded-xl border border-border bg-card overflow-hidden"
     >
       <button
-        onClick={() => !editing && setOpen(!open)}
+        onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/30 transition-colors"
       >
         <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
           <Receipt className="size-4 text-primary" />
         </div>
         <div className="flex-1 min-w-0 text-left">
-          {editing ? (
-            <form onSubmit={saveEdit} className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-              <input
-                autoFocus
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="Receipt name..."
-                className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
-              />
-              <button type="submit" className="p-1 rounded-lg hover:bg-primary/10 text-primary">
-                <Check className="size-3.5" />
-              </button>
-            </form>
-          ) : (
-            <>
-              <p className="font-medium text-sm truncate flex items-center gap-1.5">
-                {displayName}
-                <span className="text-muted-foreground font-normal">
-                  &middot; {expenses.length} {expenses.length === 1 ? "item" : "items"}
-                </span>
-                <span
-                  onClick={startEditing}
-                  className="inline-flex p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground"
-                >
-                  <Pencil className="size-3" />
-                </span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {paidBy.paid_by_name} paid &middot; {formattedDate}
-              </p>
-            </>
-          )}
+          <p className="font-medium text-sm truncate flex items-center gap-1.5">
+            {displayName}
+            <span className="text-muted-foreground font-normal">
+              &middot; {expenses.length} {expenses.length === 1 ? "item" : "items"}
+            </span>
+            <span
+              onClick={openEditor}
+              className="inline-flex p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground"
+            >
+              <Pencil className="size-3" />
+            </span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {paidBy.paid_by_name} paid &middot; {formattedDate}
+          </p>
         </div>
         <div className="text-right shrink-0 mr-1">
           <p className="font-heading font-bold tabular-nums">&euro;{total.toFixed(2)}</p>
@@ -378,8 +581,26 @@ function ReceiptGroup({
               {expenses.map((expense) => (
                 <ReceiptItemRow key={expense.id} expense={expense} groupId={groupId} members={members} />
               ))}
+              <button
+                onClick={() => setEditingReceipt(true)}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-all"
+              >
+                <Pencil className="size-3" />
+                Edit receipt
+              </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editingReceipt && (
+          <EditReceiptModal
+            expenses={expenses}
+            groupId={groupId}
+            members={members}
+            onClose={() => setEditingReceipt(false)}
+          />
         )}
       </AnimatePresence>
     </motion.div>
