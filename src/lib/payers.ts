@@ -58,3 +58,51 @@ export function payersAreValid(total: number, payers: { amount: number }[]): boo
   const sum = payers.reduce((s, p) => s + p.amount, 0);
   return Math.abs(sum - total) < EPS;
 }
+
+// A receipt's payers are entered once for the whole bill, but each line item
+// is stored as its own expense, so every payer's total has to be spread across
+// the lines. Splitting each line independently lets rounding drift accumulate
+// (three €27 lines paid 40/40/1 reopen as 39.99/39.99/1.02). This spreads all
+// payers across all lines at once, in integer cents, so BOTH invariants hold
+// exactly: every line's payer amounts sum to that line's price, and every
+// payer's amounts across lines sum back to the total they entered.
+export function distributePayersOverLines(payers: PayerInput[], lineTotals: number[]): PayerInput[][] {
+  const remPayer = payers.map((p) => Math.round(p.amount * 100));
+  const lineCents = lineTotals.map((t) => Math.round(t * 100));
+  let remTotal = remPayer.reduce((a, b) => a + b, 0);
+
+  // Keep the margins consistent: if the lines don't sum to the payer total
+  // (float noise), nudge the last line so the two grand totals match.
+  const lineSum = lineCents.reduce((a, b) => a + b, 0);
+  if (lineCents.length > 0 && lineSum !== remTotal) {
+    lineCents[lineCents.length - 1] += remTotal - lineSum;
+  }
+
+  return lineCents.map((need, i) => {
+    const isLast = i === lineCents.length - 1;
+    let alloc: number[];
+    if (isLast) {
+      // Whatever each payer still owes lands here; guarantees exact column sums.
+      alloc = [...remPayer];
+    } else {
+      const ideal = remPayer.map((rp) => (remTotal > 0 ? (need * rp) / remTotal : 0));
+      alloc = ideal.map((x) => Math.floor(x));
+      let leftover = need - alloc.reduce((a, b) => a + b, 0);
+      const byFrac = ideal
+        .map((x, idx) => ({ idx, frac: x - Math.floor(x) }))
+        .sort((a, b) => b.frac - a.frac);
+      for (const { idx } of byFrac) {
+        if (leftover <= 0) break;
+        if (alloc[idx] < remPayer[idx]) {
+          alloc[idx]++;
+          leftover--;
+        }
+      }
+    }
+    alloc.forEach((c, idx) => (remPayer[idx] -= c));
+    remTotal -= need;
+    return payers
+      .map((p, idx) => ({ memberId: p.memberId, amount: alloc[idx] / 100 }))
+      .filter((p) => p.amount > 0);
+  });
+}

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { computeSplits, splitsAreValid, SPLIT_MODES, type SplitInput, type SplitMode } from "@/lib/splits";
-import { payersAreValid, type PayerInput } from "@/lib/payers";
+import { payersAreValid, distributePayersOverLines, type PayerInput } from "@/lib/payers";
 
 function parseSplitMode(raw: FormDataEntryValue | null): SplitMode {
   const value = String(raw ?? "equal");
@@ -187,27 +187,14 @@ export async function createExpensesFromReceipt(
 ) {
   const receiptId = crypto.randomUUID();
   const name = receiptName?.trim() || undefined;
-  const receiptTotal = items.reduce((s, i) => s + i.price, 0);
-  for (const item of items) {
-    if (item.splitMemberIds.length > 0 && item.price > 0) {
-      const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
-      const itemPayers = scalePayers(payers, receiptTotal, item.price);
-      await db.addExpense(groupId, item.name, item.price, itemPayers, splits, "equal", receiptId, name);
-    }
+  const valid = items.filter((i) => i.splitMemberIds.length > 0 && i.price > 0);
+  const payersByLine = distributePayersOverLines(payers, valid.map((i) => i.price));
+  for (let k = 0; k < valid.length; k++) {
+    const item = valid[k];
+    const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
+    await db.addExpense(groupId, item.name, item.price, payersByLine[k], splits, "equal", receiptId, name);
   }
   revalidatePath(`/groups/${groupId}`);
-}
-
-// A receipt's payers are entered once for the whole total; scale each payer's
-// contribution down to their share of a single line item so every generated
-// expense's paid amounts still add up to that item's price.
-function scalePayers(payers: PayerInput[], receiptTotal: number, itemPrice: number): PayerInput[] {
-  if (payers.length === 1) return [{ memberId: payers[0].memberId, amount: itemPrice }];
-  if (receiptTotal <= 0) return payers;
-  const scaled = payers.map((p) => ({ memberId: p.memberId, amount: Math.round((p.amount / receiptTotal) * itemPrice * 100) / 100 }));
-  const drift = Math.round((itemPrice - scaled.reduce((s, p) => s + p.amount, 0)) * 100) / 100;
-  scaled[scaled.length - 1].amount = Math.round((scaled[scaled.length - 1].amount + drift) * 100) / 100;
-  return scaled.filter((p) => p.amount > 0);
 }
 
 export async function renameReceipt(receiptId: string, name: string, groupId: number) {
@@ -233,11 +220,12 @@ export async function saveReceipt(
   const valid = items.filter((i) => i.name.trim() && i.price > 0 && i.splitMemberIds.length > 0);
   if (valid.length === 0) return { error: "Add at least one item" };
 
-  const receiptTotal = valid.reduce((s, i) => s + i.price, 0);
+  const payersByLine = distributePayersOverLines(payers, valid.map((i) => i.price));
   const kept = new Set<number>();
-  for (const item of valid) {
+  for (let k = 0; k < valid.length; k++) {
+    const item = valid[k];
     const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
-    const itemPayers = scalePayers(payers, receiptTotal, item.price);
+    const itemPayers = payersByLine[k];
     if (item.id) {
       await db.updateExpense(item.id, item.name.trim(), item.price, itemPayers, splits, "equal", item.category);
       kept.add(item.id);
