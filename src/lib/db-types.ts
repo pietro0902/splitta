@@ -18,9 +18,6 @@ export type ExpenseRow = {
   group_id: number;
   description: string;
   amount: number;
-  paid_by_member_id: number;
-  paid_by_name: string;
-  paid_by_color: string;
   created_at: string;
   receipt_id: string | null;
   receipt_name: string | null;
@@ -38,7 +35,16 @@ export type ExpenseSplit = {
   weight: number | null;
 };
 
-export type Expense = ExpenseRow & { splits: ExpenseSplit[] };
+export type ExpensePayer = {
+  id: number;
+  expense_id: number;
+  member_id: number;
+  member_name: string;
+  member_color: string;
+  amount: number;
+};
+
+export type Expense = ExpenseRow & { splits: ExpenseSplit[]; payers: ExpensePayer[] };
 
 export type Settlement = {
   from: Member;
@@ -98,3 +104,4 @@ export const EXPENSE_CATEGORIES = [
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]["id"];
 
 export type { SplitMode, SplitInput } from "./splits";
+export type { PayerInput } from "./payers";

@@ -11,8 +11,12 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import { MemberAvatar } from "@/components/member-avatar";
+import { MemberAvatar, MemberAvatarStack } from "@/components/member-avatar";
 import type { Member, Expense } from "@/lib/db-types";
+
+function payerSummary(payers: Expense["payers"]): string {
+  return payers.map((p) => p.member_name).join(" & ");
+}
 
 export function AnalyticsView({
   expenses,
@@ -36,9 +40,10 @@ export function AnalyticsView({
 
   // Spending per member (who paid)
   const paidByMember = members.map((m) => {
-    const amount = expenses
-      .filter((e) => e.paid_by_member_id === m.id)
-      .reduce((s, e) => s + e.amount, 0);
+    const amount = expenses.reduce((s, e) => {
+      const paid = e.payers.find((p) => p.member_id === m.id);
+      return s + (paid?.amount ?? 0);
+    }, 0);
     return { member: m, amount: Math.round(amount * 100) / 100 };
   }).sort((a, b) => b.amount - a.amount);
 
@@ -209,10 +214,10 @@ export function AnalyticsView({
               className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
             >
               <span className="text-sm font-bold text-muted-foreground w-5">{i + 1}</span>
-              <MemberAvatar name={e.paid_by_name} color={e.paid_by_color} size="sm" />
+              <MemberAvatarStack members={e.payers.map((p) => ({ name: p.member_name, color: p.member_color }))} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{e.description}</p>
-                <p className="text-xs text-muted-foreground">{e.paid_by_name}</p>
+                <p className="text-xs text-muted-foreground">{payerSummary(e.payers)}</p>
               </div>
               <p className="font-heading font-bold tabular-nums">&euro;{e.amount.toFixed(2)}</p>
             </div>

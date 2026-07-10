@@ -1,6 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import type { Group, Member, ExpenseRow, ExpenseSplit, Expense, Settlement, SettlementRecord, ShoppingItem } from "./db-types";
+import type { Group, Member, ExpenseRow, ExpenseSplit, ExpensePayer, Expense, Settlement, SettlementRecord, ShoppingItem } from "./db-types";
 import type { SplitInput, SplitMode } from "./splits";
+import type { PayerInput } from "./payers";
 
 async function getDb(): Promise<D1Database> {
   if (process.env.NODE_ENV === "development") {
@@ -91,12 +92,9 @@ export const db = {
 
   async getExpenses(groupId: number) {
     const d1 = await getDb();
-    // Single query with JOIN to avoid N+1
     const { results: expenses } = await d1
       .prepare(
-        `SELECT e.*, m.name as paid_by_name, m.color as paid_by_color
-         FROM expenses e
-         JOIN members m ON e.paid_by_member_id = m.id
+        `SELECT e.* FROM expenses e
          WHERE e.group_id = ?
          ORDER BY e.created_at DESC`
       )
@@ -105,7 +103,7 @@ export const db = {
 
     if (expenses.length === 0) return [];
 
-    // Fetch all splits for all expenses in this group in one query
+    // Fetch all splits and all payers for all expenses in this group in one query each
     const expenseIds = expenses.map((e) => e.id);
     const placeholders = expenseIds.map(() => "?").join(",");
     const { results: allSplits } = await d1
@@ -118,7 +116,16 @@ export const db = {
       .bind(...expenseIds)
       .all<ExpenseSplit>();
 
-    // Group splits by expense_id
+    const { results: allPayers } = await d1
+      .prepare(
+        `SELECT ep.*, m.name as member_name, m.color as member_color
+         FROM expense_payers ep
+         JOIN members m ON ep.member_id = m.id
+         WHERE ep.expense_id IN (${placeholders})`
+      )
+      .bind(...expenseIds)
+      .all<ExpensePayer>();
+
     const splitsByExpense = new Map<number, ExpenseSplit[]>();
     for (const split of allSplits) {
       const arr = splitsByExpense.get(split.expense_id) || [];
@@ -126,9 +133,17 @@ export const db = {
       splitsByExpense.set(split.expense_id, arr);
     }
 
+    const payersByExpense = new Map<number, ExpensePayer[]>();
+    for (const payer of allPayers) {
+      const arr = payersByExpense.get(payer.expense_id) || [];
+      arr.push(payer);
+      payersByExpense.set(payer.expense_id, arr);
+    }
+
     return expenses.map((e) => ({
       ...e,
       splits: splitsByExpense.get(e.id) || [],
+      payers: payersByExpense.get(e.id) || [],
     }));
   },
 
@@ -136,7 +151,7 @@ export const db = {
     groupId: number,
     description: string,
     amount: number,
-    paidByMemberId: number,
+    payers: PayerInput[],
     splits: SplitInput[],
     splitMode: SplitMode,
     receiptId?: string,
@@ -144,22 +159,30 @@ export const db = {
     category?: string
   ) {
     const d1 = await getDb();
+    const primaryPayerId = payers.reduce((a, b) => (b.amount > a.amount ? b : a)).memberId;
 
     const expenseResult = await d1
       .prepare(
         "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amount, paidByMemberId, receiptId ?? null, receiptName ?? null, category ?? null, splitMode)
+      .bind(groupId, description, amount, primaryPayerId, receiptId ?? null, receiptName ?? null, category ?? null, splitMode)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
-    const stmts = splits.map((s) =>
-      d1
-        .prepare(
-          "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
-        )
-        .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
-    );
+    const stmts = [
+      ...payers.map((p) =>
+        d1
+          .prepare("INSERT INTO expense_payers (expense_id, member_id, amount) VALUES (?, ?, ?)")
+          .bind(expenseId, p.memberId, p.amount)
+      ),
+      ...splits.map((s) =>
+        d1
+          .prepare(
+            "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
+          )
+          .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
+      ),
+    ];
     await d1.batch(stmts);
     return expenseId;
   },
@@ -176,33 +199,39 @@ export const db = {
     expenseId: number,
     description: string,
     amount: number,
-    paidByMemberId: number,
+    payers: PayerInput[],
     splits: SplitInput[],
     splitMode: SplitMode,
     category?: string
   ) {
     const d1 = await getDb();
+    const primaryPayerId = payers.reduce((a, b) => (b.amount > a.amount ? b : a)).memberId;
 
     await d1
       .prepare(
         "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ?, category = ?, split_mode = ? WHERE id = ?"
       )
-      .bind(description, amount, paidByMemberId, category ?? null, splitMode, expenseId)
+      .bind(description, amount, primaryPayerId, category ?? null, splitMode, expenseId)
       .run();
 
-    // Delete old splits and insert new ones
-    await d1
-      .prepare("DELETE FROM expense_splits WHERE expense_id = ?")
-      .bind(expenseId)
-      .run();
+    // Delete old payers/splits and insert the new ones
+    await d1.prepare("DELETE FROM expense_payers WHERE expense_id = ?").bind(expenseId).run();
+    await d1.prepare("DELETE FROM expense_splits WHERE expense_id = ?").bind(expenseId).run();
 
-    const stmts = splits.map((s) =>
-      d1
-        .prepare(
-          "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
-        )
-        .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
-    );
+    const stmts = [
+      ...payers.map((p) =>
+        d1
+          .prepare("INSERT INTO expense_payers (expense_id, member_id, amount) VALUES (?, ?, ?)")
+          .bind(expenseId, p.memberId, p.amount)
+      ),
+      ...splits.map((s) =>
+        d1
+          .prepare(
+            "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
+          )
+          .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
+      ),
+    ];
     await d1.batch(stmts);
   },
 
@@ -326,7 +355,9 @@ export const db = {
     members.forEach((m) => (balances[m.id] = 0));
 
     expenses.forEach((expense) => {
-      balances[expense.paid_by_member_id] += expense.amount;
+      expense.payers.forEach((payer) => {
+        balances[payer.member_id] += payer.amount;
+      });
       expense.splits.forEach((split) => {
         balances[split.member_id] -= split.amount;
       });
@@ -395,6 +426,7 @@ export type {
   Member,
   ExpenseRow,
   ExpenseSplit,
+  ExpensePayer,
   Expense,
   Settlement,
   GroupWithDetails,

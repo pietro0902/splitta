@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import Anthropic from "@anthropic-ai/sdk";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { computeSplits, splitsAreValid, SPLIT_MODES, type SplitInput, type SplitMode } from "@/lib/splits";
+import { payersAreValid, type PayerInput } from "@/lib/payers";
 
 function parseSplitMode(raw: FormDataEntryValue | null): SplitMode {
   const value = String(raw ?? "equal");
@@ -49,23 +50,38 @@ function parseSplits(raw: FormDataEntryValue | null): SplitInput[] {
   }
 }
 
+function parsePayers(raw: FormDataEntryValue | null): PayerInput[] {
+  try {
+    const parsed = JSON.parse(String(raw ?? "[]"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((p) => ({ memberId: Number(p.memberId), amount: Number(p.amount) }))
+      .filter((p) => p.memberId && Number.isFinite(p.amount) && p.amount > 0);
+  } catch {
+    return [];
+  }
+}
+
 export async function addExpense(formData: FormData) {
   const groupId = Number(formData.get("groupId"));
   const description = formData.get("description") as string;
   const amount = Number(formData.get("amount"));
-  const paidByMemberId = Number(formData.get("paidByMemberId"));
+  const payers = parsePayers(formData.get("payers"));
   const splitMode = parseSplitMode(formData.get("splitMode"));
   const splits = parseSplits(formData.get("splits"));
   const category = (formData.get("category") as string) || undefined;
 
-  if (!description || !amount || !paidByMemberId || splits.length === 0) {
+  if (!description || !amount || payers.length === 0 || splits.length === 0) {
     return { error: "All fields are required" };
+  }
+  if (!payersAreValid(amount, payers)) {
+    return { error: "The paid amounts do not add up to the total" };
   }
   if (!splitsAreValid(amount, splits)) {
     return { error: "The split does not add up to the total" };
   }
 
-  await db.addExpense(groupId, description, amount, paidByMemberId, splits, splitMode, undefined, undefined, category);
+  await db.addExpense(groupId, description, amount, payers, splits, splitMode, undefined, undefined, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -74,18 +90,21 @@ export async function updateExpense(
   groupId: number,
   description: string,
   amount: number,
-  paidByMemberId: number,
+  payers: PayerInput[],
   splits: SplitInput[],
   splitMode: SplitMode,
   category?: string
 ) {
-  if (!description || !amount || !paidByMemberId || splits.length === 0) {
+  if (!description || !amount || payers.length === 0 || splits.length === 0) {
     return { error: "All fields are required" };
+  }
+  if (!payersAreValid(amount, payers)) {
+    return { error: "The paid amounts do not add up to the total" };
   }
   if (!splitsAreValid(amount, splits)) {
     return { error: "The split does not add up to the total" };
   }
-  await db.updateExpense(expenseId, description, amount, paidByMemberId, splits, splitMode, category);
+  await db.updateExpense(expenseId, description, amount, payers, splits, splitMode, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -162,19 +181,33 @@ export async function scanReceiptClaude(formData: FormData) {
 
 export async function createExpensesFromReceipt(
   groupId: number,
-  paidByMemberId: number,
+  payers: PayerInput[],
   items: { name: string; price: number; splitMemberIds: number[] }[],
   receiptName?: string
 ) {
   const receiptId = crypto.randomUUID();
   const name = receiptName?.trim() || undefined;
+  const receiptTotal = items.reduce((s, i) => s + i.price, 0);
   for (const item of items) {
     if (item.splitMemberIds.length > 0 && item.price > 0) {
       const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
-      await db.addExpense(groupId, item.name, item.price, paidByMemberId, splits, "equal", receiptId, name);
+      const itemPayers = scalePayers(payers, receiptTotal, item.price);
+      await db.addExpense(groupId, item.name, item.price, itemPayers, splits, "equal", receiptId, name);
     }
   }
   revalidatePath(`/groups/${groupId}`);
+}
+
+// A receipt's payers are entered once for the whole total; scale each payer's
+// contribution down to their share of a single line item so every generated
+// expense's paid amounts still add up to that item's price.
+function scalePayers(payers: PayerInput[], receiptTotal: number, itemPrice: number): PayerInput[] {
+  if (payers.length === 1) return [{ memberId: payers[0].memberId, amount: itemPrice }];
+  if (receiptTotal <= 0) return payers;
+  const scaled = payers.map((p) => ({ memberId: p.memberId, amount: Math.round((p.amount / receiptTotal) * itemPrice * 100) / 100 }));
+  const drift = Math.round((itemPrice - scaled.reduce((s, p) => s + p.amount, 0)) * 100) / 100;
+  scaled[scaled.length - 1].amount = Math.round((scaled[scaled.length - 1].amount + drift) * 100) / 100;
+  return scaled.filter((p) => p.amount > 0);
 }
 
 export async function renameReceipt(receiptId: string, name: string, groupId: number) {
@@ -191,23 +224,25 @@ export async function saveReceipt(
   groupId: number,
   receiptId: string,
   receiptName: string,
-  paidByMemberId: number,
+  payers: PayerInput[],
   items: { id?: number; name: string; price: number; splitMemberIds: number[]; category?: string }[],
   originalIds: number[]
 ) {
-  if (!paidByMemberId) return { error: "Select who paid" };
+  if (payers.length === 0) return { error: "Select who paid" };
 
   const valid = items.filter((i) => i.name.trim() && i.price > 0 && i.splitMemberIds.length > 0);
   if (valid.length === 0) return { error: "Add at least one item" };
 
+  const receiptTotal = valid.reduce((s, i) => s + i.price, 0);
   const kept = new Set<number>();
   for (const item of valid) {
     const { splits } = computeSplits("equal", item.price, item.splitMemberIds, {});
+    const itemPayers = scalePayers(payers, receiptTotal, item.price);
     if (item.id) {
-      await db.updateExpense(item.id, item.name.trim(), item.price, paidByMemberId, splits, "equal", item.category);
+      await db.updateExpense(item.id, item.name.trim(), item.price, itemPayers, splits, "equal", item.category);
       kept.add(item.id);
     } else {
-      await db.addExpense(groupId, item.name.trim(), item.price, paidByMemberId, splits, "equal", receiptId, receiptName.trim() || undefined);
+      await db.addExpense(groupId, item.name.trim(), item.price, itemPayers, splits, "equal", receiptId, receiptName.trim() || undefined);
     }
   }
 

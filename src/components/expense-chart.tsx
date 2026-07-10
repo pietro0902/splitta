@@ -17,9 +17,10 @@ export function ExpenseChart({
   members: Member[];
 }) {
   const spendingByMember = members.map((m) => {
-    const total = expenses
-      .filter((e) => e.paid_by_member_id === m.id)
-      .reduce((sum, e) => sum + e.amount, 0);
+    const total = expenses.reduce((sum, e) => {
+      const paid = e.payers.find((p) => p.member_id === m.id);
+      return sum + (paid?.amount ?? 0);
+    }, 0);
     return { name: m.name, value: Math.round(total * 100) / 100, color: m.color };
   }).filter((d) => d.value > 0);
 

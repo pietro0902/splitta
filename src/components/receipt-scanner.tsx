@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Camera, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
+import { PayerEditor } from "@/components/payer-editor";
+import { computePayers } from "@/lib/payers";
 import {
   scanReceiptClaude,
   createExpensesFromReceipt,
@@ -27,7 +29,8 @@ export function ReceiptScanner({
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [items, setItems] = useState<ItemWithSplits[] | null>(null);
-  const [paidBy, setPaidBy] = useState<number | null>(null);
+  const [paidBy, setPaidBy] = useState<Set<number>>(new Set());
+  const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>({});
   const [receiptName, setReceiptName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isScanning, startScan] = useTransition();
@@ -122,12 +125,22 @@ export function ReceiptScanner({
     setItems((prev) => prev ? prev.filter((_, i) => i !== index) : prev);
   }
 
+  function togglePayer(id: number) {
+    const next = new Set(paidBy);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPaidBy(next);
+  }
+
+  const total = items?.reduce((s, i) => s + i.price, 0) ?? 0;
+  const payerResult = computePayers(total, Array.from(paidBy), paidAmounts);
+
   function handleSubmit() {
-    if (!items || !paidBy) return;
+    if (!items || !payerResult.valid) return;
     startSubmit(async () => {
       await createExpensesFromReceipt(
         groupId,
-        paidBy,
+        payerResult.payers,
         items.map((item) => ({
           name: item.name,
           price: item.price,
@@ -144,12 +157,11 @@ export function ReceiptScanner({
     setPreview(null);
     setFile(null);
     setItems(null);
-    setPaidBy(null);
+    setPaidBy(new Set());
+    setPaidAmounts({});
     setReceiptName("");
     setError(null);
   }
-
-  const total = items?.reduce((s, i) => s + i.price, 0) ?? 0;
 
   return (
     <>
@@ -267,27 +279,14 @@ export function ReceiptScanner({
                   </div>
 
                   {/* Paid by */}
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                      Paid by
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {members.map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => setPaidBy(m.id)}
-                          className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                            paidBy === m.id
-                              ? "bg-primary/10 ring-2 ring-primary text-primary"
-                              : "bg-muted/50 hover:bg-muted text-foreground"
-                          }`}
-                        >
-                          <MemberAvatar name={m.name} color={m.color} size="sm" />
-                          <span className="truncate">{m.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <PayerEditor
+                    members={members}
+                    selected={paidBy}
+                    onToggle={togglePayer}
+                    amounts={paidAmounts}
+                    onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
+                    result={payerResult}
+                  />
 
                   {/* Items list */}
                   <div>
@@ -370,7 +369,7 @@ export function ReceiptScanner({
                     </Button>
                     <Button
                       onClick={handleSubmit}
-                      disabled={!paidBy || items.length === 0 || isSubmitting}
+                      disabled={!payerResult.valid || items.length === 0 || isSubmitting}
                       className="flex-1 h-12 rounded-xl text-base font-semibold"
                     >
                       {isSubmitting ? (

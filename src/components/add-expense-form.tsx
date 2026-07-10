@@ -5,9 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Plus, X, Receipt } from "lucide-react";
 import { addExpense } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import { MemberAvatar } from "@/components/member-avatar";
 import { SplitEditor } from "@/components/split-editor";
+import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, type SplitMode } from "@/lib/splits";
+import { computePayers } from "@/lib/payers";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Member } from "@/lib/db-types";
 
@@ -21,7 +22,8 @@ export function AddExpenseForm({
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [paidBy, setPaidBy] = useState<number | null>(null);
+  const [paidBy, setPaidBy] = useState<Set<number>>(new Set());
+  const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>({});
   const [splitMode, setSplitMode] = useState<SplitMode>("equal");
   const [splitWith, setSplitWith] = useState<Set<number>>(new Set(members.map((m) => m.id)));
   const [splitWeights, setSplitWeights] = useState<Record<number, string>>({});
@@ -30,6 +32,7 @@ export function AddExpenseForm({
 
   const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
   const splitResult = computeSplits(splitMode, Number(amount) || 0, participantIds, toNumericWeights(splitWeights));
+  const payerResult = computePayers(Number(amount) || 0, Array.from(paidBy), paidAmounts);
 
   function toggleSplit(id: number) {
     const next = new Set(splitWith);
@@ -38,13 +41,20 @@ export function AddExpenseForm({
     setSplitWith(next);
   }
 
+  function togglePayer(id: number) {
+    const next = new Set(paidBy);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPaidBy(next);
+  }
+
   function handleSubmit() {
-    if (!description || !amount || !paidBy || !splitResult.valid) return;
+    if (!description || !amount || !payerResult.valid || !splitResult.valid) return;
     const formData = new FormData();
     formData.set("groupId", String(groupId));
     formData.set("description", description);
     formData.set("amount", amount);
-    formData.set("paidByMemberId", String(paidBy));
+    formData.set("payers", JSON.stringify(payerResult.payers));
     formData.set("splitMode", splitMode);
     formData.set("splits", JSON.stringify(splitResult.splits));
     if (category) formData.set("category", category);
@@ -57,7 +67,8 @@ export function AddExpenseForm({
   function reset() {
     setDescription("");
     setAmount("");
-    setPaidBy(null);
+    setPaidBy(new Set());
+    setPaidAmounts({});
     setSplitMode("equal");
     setSplitWith(new Set(members.map((m) => m.id)));
     setSplitWeights({});
@@ -147,25 +158,14 @@ export function AddExpenseForm({
                 </div>
 
                 {/* Paid by */}
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Paid by</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {members.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setPaidBy(m.id)}
-                        className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                          paidBy === m.id
-                            ? "bg-primary/10 ring-2 ring-primary text-primary"
-                            : "bg-muted/50 hover:bg-muted text-foreground"
-                        }`}
-                      >
-                        <MemberAvatar name={m.name} color={m.color} size="sm" />
-                        <span className="truncate">{m.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <PayerEditor
+                  members={members}
+                  selected={paidBy}
+                  onToggle={togglePayer}
+                  amounts={paidAmounts}
+                  onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
+                  result={payerResult}
+                />
 
                 {/* Split */}
                 <SplitEditor
@@ -181,7 +181,7 @@ export function AddExpenseForm({
 
                 <Button
                   onClick={handleSubmit}
-                  disabled={!description || !amount || !paidBy || !splitResult.valid || isPending}
+                  disabled={!description || !amount || !payerResult.valid || !splitResult.valid || isPending}
                   className="w-full h-12 rounded-xl text-base font-semibold"
                 >
                   {isPending ? "Adding..." : "Add Expense"}

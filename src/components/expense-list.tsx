@@ -3,17 +3,23 @@
 import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trash2, Receipt, ChevronDown, Pencil, X, Plus } from "lucide-react";
-import { MemberAvatar } from "@/components/member-avatar";
+import { MemberAvatar, MemberAvatarStack } from "@/components/member-avatar";
 import { deleteExpense, updateExpense, saveReceipt } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { SplitEditor } from "@/components/split-editor";
+import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, roundCents, SPLIT_MODES, type SplitMode } from "@/lib/splits";
+import { computePayers } from "@/lib/payers";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
-import type { Expense, Member } from "@/lib/db-types";
+import type { Expense, ExpensePayer, Member } from "@/lib/db-types";
 
 function getCategoryInfo(categoryId: string | null) {
   if (!categoryId) return null;
   return EXPENSE_CATEGORIES.find((c) => c.id === categoryId) ?? null;
+}
+
+function payerSummary(payers: ExpensePayer[]): string {
+  return payers.map((p) => p.member_name).join(" & ");
 }
 
 function initialSplitMode(expense: Expense): SplitMode {
@@ -116,7 +122,10 @@ function EditExpenseModal({
 }) {
   const [description, setDescription] = useState(expense.description);
   const [amount, setAmount] = useState(String(expense.amount));
-  const [paidBy, setPaidBy] = useState(expense.paid_by_member_id);
+  const [paidBy, setPaidBy] = useState<Set<number>>(new Set(expense.payers.map((p) => p.member_id)));
+  const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>(
+    Object.fromEntries(expense.payers.map((p) => [p.member_id, String(p.amount)]))
+  );
   const initialMode = initialSplitMode(expense);
   const [splitMode, setSplitMode] = useState<SplitMode>(initialMode);
   const [splitWith, setSplitWith] = useState<Set<number>>(
@@ -130,6 +139,7 @@ function EditExpenseModal({
 
   const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
   const splitResult = computeSplits(splitMode, Number(amount) || 0, participantIds, toNumericWeights(splitWeights));
+  const payerResult = computePayers(Number(amount) || 0, Array.from(paidBy), paidAmounts);
 
   function toggleSplit(id: number) {
     const next = new Set(splitWith);
@@ -138,15 +148,22 @@ function EditExpenseModal({
     setSplitWith(next);
   }
 
+  function togglePayer(id: number) {
+    const next = new Set(paidBy);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPaidBy(next);
+  }
+
   function handleSave() {
-    if (!description || !amount || !paidBy || !splitResult.valid) return;
+    if (!description || !amount || !payerResult.valid || !splitResult.valid) return;
     startTransition(async () => {
       await updateExpense(
         expense.id,
         groupId,
         description,
         Number(amount),
-        paidBy,
+        payerResult.payers,
         splitResult.splits,
         splitMode,
         category || undefined
@@ -221,25 +238,14 @@ function EditExpenseModal({
             </div>
           </div>
 
-          <div>
-            <label className="text-sm font-medium text-muted-foreground mb-2 block">Paid by</label>
-            <div className="grid grid-cols-2 gap-2">
-              {members.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setPaidBy(m.id)}
-                  className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                    paidBy === m.id
-                      ? "bg-primary/10 ring-2 ring-primary text-primary"
-                      : "bg-muted/50 hover:bg-muted text-foreground"
-                  }`}
-                >
-                  <MemberAvatar name={m.name} color={m.color} size="sm" />
-                  <span className="truncate">{m.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <PayerEditor
+            members={members}
+            selected={paidBy}
+            onToggle={togglePayer}
+            amounts={paidAmounts}
+            onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
+            result={payerResult}
+          />
 
           <SplitEditor
             members={members}
@@ -254,7 +260,7 @@ function EditExpenseModal({
 
           <Button
             onClick={handleSave}
-            disabled={!description || !amount || !paidBy || !splitResult.valid || isPending}
+            disabled={!description || !amount || !payerResult.valid || !splitResult.valid || isPending}
             className="w-full h-12 rounded-xl text-base font-semibold"
           >
             {isPending ? "Saving..." : "Save Changes"}
@@ -287,7 +293,16 @@ function EditReceiptModal({
   const receiptId = expenses[0].receipt_id!;
   const originalIds = expenses.map((e) => e.id);
   const [receiptName, setReceiptName] = useState(expenses[0].receipt_name ?? "");
-  const [paidBy, setPaidBy] = useState<number | null>(expenses[0].paid_by_member_id);
+  const receiptPayerTotals = new Map<number, number>();
+  for (const e of expenses) {
+    for (const p of e.payers) {
+      receiptPayerTotals.set(p.member_id, (receiptPayerTotals.get(p.member_id) ?? 0) + p.amount);
+    }
+  }
+  const [paidBy, setPaidBy] = useState<Set<number>>(new Set(receiptPayerTotals.keys()));
+  const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>(
+    Object.fromEntries(Array.from(receiptPayerTotals.entries()).map(([id, amt]) => [id, String(roundCents(amt))]))
+  );
   const [lines, setLines] = useState<ReceiptLine[]>(() =>
     expenses.map((e) => ({
       id: e.id,
@@ -327,18 +342,26 @@ function EditReceiptModal({
   }
 
   const total = lines.reduce((s, l) => s + (Number(l.price) || 0), 0);
+  const payerResult = computePayers(total, Array.from(paidBy), paidAmounts);
   const canSave =
-    paidBy != null &&
+    payerResult.valid &&
     lines.some((l) => l.name.trim() && Number(l.price) > 0 && l.splitMemberIds.size > 0);
 
+  function togglePayer(id: number) {
+    const next = new Set(paidBy);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPaidBy(next);
+  }
+
   function handleSave() {
-    if (!canSave || paidBy == null) return;
+    if (!canSave) return;
     startTransition(async () => {
       await saveReceipt(
         groupId,
         receiptId,
         receiptName,
-        paidBy,
+        payerResult.payers,
         lines.map((l) => ({
           id: l.id,
           name: l.name,
@@ -391,25 +414,14 @@ function EditReceiptModal({
           </div>
 
           {/* Paid by */}
-          <div>
-            <label className="text-sm font-medium text-muted-foreground mb-2 block">Paid by</label>
-            <div className="grid grid-cols-2 gap-2">
-              {members.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setPaidBy(m.id)}
-                  className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                    paidBy === m.id
-                      ? "bg-primary/10 ring-2 ring-primary text-primary"
-                      : "bg-muted/50 hover:bg-muted text-foreground"
-                  }`}
-                >
-                  <MemberAvatar name={m.name} color={m.color} size="sm" />
-                  <span className="truncate">{m.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <PayerEditor
+            members={members}
+            selected={paidBy}
+            onToggle={togglePayer}
+            amounts={paidAmounts}
+            onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
+            result={payerResult}
+          />
 
           {/* Items */}
           <div>
@@ -512,7 +524,7 @@ function ReceiptGroup({
   const [open, setOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState(false);
   const total = expenses.reduce((s, e) => s + e.amount, 0);
-  const paidBy = expenses[0];
+  const payerLabel = payerSummary(expenses[0].payers);
   const receiptName = expenses[0].receipt_name;
   const date = new Date(expenses[0].created_at + "Z");
   const formattedDate = date.toLocaleDateString("en-GB", {
@@ -555,7 +567,7 @@ function ReceiptGroup({
             </span>
           </p>
           <p className="text-xs text-muted-foreground">
-            {paidBy.paid_by_name} paid &middot; {formattedDate}
+            {payerLabel} paid &middot; {formattedDate}
           </p>
         </div>
         <div className="text-right shrink-0 mr-1">
@@ -690,7 +702,7 @@ function ExpenseItem({
         className="group flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:bg-accent/30 transition-colors cursor-pointer"
         onClick={() => setEditingExpense(true)}
       >
-        <MemberAvatar name={expense.paid_by_name} color={expense.paid_by_color} />
+        <MemberAvatarStack members={expense.payers.map((p) => ({ name: p.member_name, color: p.member_color }))} />
         <div className="flex-1 min-w-0">
           <p className="font-medium text-sm truncate flex items-center gap-1.5">
             {expense.description}
@@ -701,7 +713,7 @@ function ExpenseItem({
             )}
           </p>
           <p className="text-xs text-muted-foreground">
-            {expense.paid_by_name} paid &middot; {formattedDate}
+            {payerSummary(expense.payers)} paid &middot; {formattedDate}
           </p>
         </div>
         <div className="text-right shrink-0">
