@@ -131,6 +131,17 @@
   }
 }
 
+@layer utilities {
+  /* Horizontal scroll without a visible scrollbar (used on mobile rows). */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Noise texture overlay */
 .noise-bg::before {
   content: "";

@@ -437,7 +437,7 @@ function EditReceiptModal({
                       value={line.name}
                       placeholder="Item"
                       onChange={(e) => updateLine(idx, "name", e.target.value)}
-                      className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                      className="flex-1 min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
                     />
                     <div className="relative shrink-0">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">
@@ -455,19 +455,19 @@ function EditReceiptModal({
                     </div>
                     <button
                       onClick={() => removeLine(idx)}
-                      className="text-muted-foreground hover:text-destructive p-1.5"
+                      className="text-muted-foreground hover:text-destructive p-1.5 shrink-0"
                     >
                       <X className="size-4" />
                     </button>
                   </div>
 
-                  {/* Split selection per item */}
-                  <div className="flex flex-wrap gap-1.5">
+                  {/* Split selection per item — single scrollable row on mobile */}
+                  <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:mx-0 sm:px-0">
                     {members.map((m) => (
                       <button
                         key={m.id}
                         onClick={() => toggleLineSplit(idx, m.id)}
-                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all shrink-0 whitespace-nowrap ${
                           line.splitMemberIds.has(m.id)
                             ? "bg-primary/10 ring-1 ring-primary text-primary"
                             : "bg-muted/50 text-muted-foreground"
