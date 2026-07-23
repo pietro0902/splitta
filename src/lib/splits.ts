@@ -34,9 +34,17 @@ export type SplitResult = {
   error: string | null;
 };
 
-// Distribute `total` across entries proportionally to their weight, rounding
-// each share to cents and letting the last kept entry absorb the rounding
-// remainder so the parts always sum back to `total` exactly.
+// Distribute `total` across entries proportionally to their weight using the
+// largest-remainder method (like distributePayersOverLines in payers.ts): work
+// in integer cents, floor every share, then hand the leftover cents out one
+// each to whoever was rounded down the most. This keeps every part within a
+// cent of its fair share AND makes the parts sum back to `total` exactly,
+// instead of dumping all the odd cents on the last person.
+//
+// When several entries are tied (e.g. an equal split of €10 across 3), the
+// leftover would always land on the same index. To avoid one person eating the
+// rounding on every equal bill, ties are resolved from a starting offset that
+// rotates with the amount, so the odd cent moves around across expenses.
 function distribute(
   total: number,
   entries: { memberId: number; raw: number }[]
@@ -45,17 +53,24 @@ function distribute(
   const sumRaw = kept.reduce((s, e) => s + e.raw, 0);
   if (sumRaw <= 0) return [];
 
-  let acc = 0;
-  return kept.map((e, i) => {
-    let amount: number;
-    if (i === kept.length - 1) {
-      amount = roundCents(total - acc);
-    } else {
-      amount = roundCents((total * e.raw) / sumRaw);
-      acc += amount;
-    }
-    return { memberId: e.memberId, amount, weight: e.raw };
+  const totalCents = Math.round(total * 100);
+  const parts = kept.map((e) => {
+    const exact = (totalCents * e.raw) / sumRaw;
+    const base = Math.floor(exact);
+    return { memberId: e.memberId, raw: e.raw, cents: base, frac: exact - base };
   });
+
+  const n = parts.length;
+  const leftover = totalCents - parts.reduce((s, p) => s + p.cents, 0);
+  const rot = (((totalCents % n) + n) % n);
+  const order = parts
+    .map((p, i) => ({ i, frac: p.frac }))
+    // Biggest fractional remainder first; ties broken by a rotating index so
+    // the extra cent is not always given to the same (e.g. first) person.
+    .sort((a, b) => b.frac - a.frac || ((a.i - rot + n) % n) - ((b.i - rot + n) % n));
+  for (let k = 0; k < leftover; k++) parts[order[k].i].cents += 1;
+
+  return parts.map((p) => ({ memberId: p.memberId, amount: p.cents / 100, weight: p.raw }));
 }
 
 /**
