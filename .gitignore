@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# Tesseract language data — downloaded on demand into the cwd when the OCR
+# runs under Node (parser tooling). The browser fetches its own from the CDN.
+*.traineddata
+
 # next.js
 /.next/
 /out/
