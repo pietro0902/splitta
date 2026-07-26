@@ -63,6 +63,19 @@ const TOTAL_KEYWORDS = [
  */
 const TRAILING_PRICE = /(-?\d{1,5}[.,]\d{2})\s*[A-Z*€]{0,3}\s*$/;
 
+/**
+ * Same shape, but tolerating the letters OCR substitutes for digits on faded
+ * thermal print. Only tried when the strict pattern finds nothing, so a
+ * cleanly-read line is never reinterpreted — this recovers "1,S0" instead of
+ * dropping the item, without loosening the common case.
+ */
+const TRAILING_PRICE_LOOSE =
+  /(-?[\dOoQlI|SsBbZz]{1,5}[.,][\dOoQlI|SsBbZz]{2})\s*[A-Z*€]{0,3}\s*$/;
+
+function matchTrailingPrice(line: string): RegExpMatchArray | null {
+  return line.match(TRAILING_PRICE) ?? line.match(TRAILING_PRICE_LOOSE);
+}
+
 /** "2 x 1,20" / "2X1,20" / "0,450 kg x 12,90" — a quantity line. */
 const QUANTITY_LINE =
   /^\s*(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:KG|GR|G|LT|L|PZ)?\s*[x*]\s*(\d{1,5}[.,]\d{2})/i;
@@ -125,7 +138,7 @@ function findTotal(lines: string[]): { value: number | null; index: number } {
     // Reject the VAT recap lines ("TOTALE IVA 22%"), which restate a tax slice.
     if (/\bIVA\b/.test(normalized)) continue;
 
-    const match = lines[i].match(TRAILING_PRICE);
+    const match = matchTrailingPrice(lines[i]);
     if (match) {
       const value = toAmount(match[1]);
       if (value !== null && value > 0) return { value, index: i };
@@ -136,8 +149,10 @@ function findTotal(lines: string[]): { value: number | null; index: number } {
 
 function cleanName(raw: string): string {
   return raw
-    // Drop leading department/EAN codes: "07 PANE" / "2001234567890 LATTE".
-    .replace(/^\s*[\d*#]{2,}\s+/, "")
+    // Drop leading EAN/barcode digits: "2001234567890 LATTE". Requires 4+ digits
+    // so real name prefixes survive — "12 UOVA" and "500 GR PASTA" are product
+    // names, not codes.
+    .replace(/^\s*[\d*#]{4,}\s+/, "")
     // Collapse the dot/space leaders that pad the gap before the price.
     .replace(/[.\s_-]{3,}$/, "")
     .replace(/\s+/g, " ")
@@ -162,7 +177,7 @@ export function parseReceipt(text: string): ParsedReceipt {
 
     if (normalized.length < 2) continue;
 
-    const priceMatch = line.match(TRAILING_PRICE);
+    const priceMatch = matchTrailingPrice(line);
     const quantityMatch = line.match(QUANTITY_LINE);
 
     // --- Discount line: fold into the item above it -----------------------
@@ -188,7 +203,7 @@ export function parseReceipt(text: string): ParsedReceipt {
       // The line total may be printed at the far right ("2 x 1,20    2,40").
       // Trust it when present; otherwise multiply.
       const rest = line.slice(quantityMatch[0].length);
-      const restPrice = rest.match(TRAILING_PRICE);
+      const restPrice = matchTrailingPrice(rest);
       const lineTotal =
         restPrice !== null
           ? toAmount(restPrice[1])
@@ -199,9 +214,8 @@ export function parseReceipt(text: string): ParsedReceipt {
       if (lineTotal === null) continue;
 
       // The product name is usually on the preceding line, which had no price.
-      const previous = items[items.length - 1];
       const previousRaw = i > 0 ? cleanName(body[i - 1]) : "";
-      const previousHadPrice = i > 0 && TRAILING_PRICE.test(body[i - 1]);
+      const previousHadPrice = i > 0 && matchTrailingPrice(body[i - 1]) !== null;
 
       if (!previousHadPrice && previousRaw && !CODE_ONLY.test(previousRaw)) {
         items.push({
@@ -209,10 +223,16 @@ export function parseReceipt(text: string): ParsedReceipt {
           price: lineTotal,
           quantity: quantity ?? undefined,
         });
-      } else if (previous) {
-        // Name line already became an item — this line restates its true total.
-        previous.price = lineTotal;
-        previous.quantity = quantity ?? undefined;
+      } else {
+        // The preceding line was already a complete item (name + price), so this
+        // quantity line belongs to a different product whose name OCR lost.
+        // Emit it separately — overwriting the previous item's price would
+        // corrupt that product *and* drop this one.
+        items.push({
+          name: UNNAMED_ITEM,
+          price: lineTotal,
+          quantity: quantity ?? undefined,
+        });
       }
       continue;
     }

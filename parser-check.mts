@@ -77,6 +77,29 @@ CARTA DI CREDITO        10,50
     expectMatch: true,
   },
   {
+    label: "OCR damage: letter-for-digit price, quantity line after a full item",
+    text: `
+MARKET
+12 UOVA FRESCHE          3,20
+LATTE                    1,S0
+BISCOTTI                 2,40
+3 x 0,50                 1,50
+TOTALE                   8,60
+`,
+    expected: [
+      // Leading "12" is part of the name, not a code to strip.
+      ["12 UOVA FRESCHE", 3.2],
+      // "1,S0" recovered by the loose price pattern + digit repair.
+      ["LATTE", 1.5],
+      ["BISCOTTI", 2.4],
+      // Quantity line follows a complete item, so it's a separate product
+      // whose name OCR lost — must not overwrite BISCOTTI.
+      [UNNAMED_ITEM, 1.5],
+    ],
+    expectTotal: 8.6,
+    expectMatch: true,
+  },
+  {
     label: "no printed total: checksum unavailable, items still extracted",
     text: `
 BAR CENTRALE
@@ -134,3 +157,7 @@ for (const testCase of CASES) {
 }
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
+
+// Fail loudly: without this the script exits 0 on failure and any caller
+// (CI step, git hook, chained &&) reads a regression as a pass.
+process.exitCode = failures === 0 ? 0 : 1;

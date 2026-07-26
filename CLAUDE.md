@@ -24,10 +24,10 @@ npm run db:migrate:remote  # apply migrations/ to the remote D1 database
 ```
 
 ```bash
-npx tsx parser-check.mts   # exercise the receipt parser on text fixtures (no browser/OCR needed)
+npm run check:parser     # exercise the receipt parser on text fixtures (no browser/OCR needed)
 ```
 
-There is no test suite. Validate changes with `npm run lint` and `npm run build`. When touching receipt extraction, also run `parser-check.mts` — and add the failing receipt's OCR text as a new case when you hit one that scans badly.
+There is no test suite. Validate changes with `npm run lint` and `npm run build`. When touching receipt extraction, also run `npm run check:parser` — it exits non-zero on failure — and add the failing receipt's OCR text as a new case when you hit one that scans badly.
 
 ## Database access — the dev/prod split (important)
 

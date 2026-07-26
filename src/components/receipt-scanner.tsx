@@ -16,12 +16,8 @@ type ItemWithSplits = ParsedItem & {
   splitMemberIds: Set<number>;
 };
 
-/** What the receipt's own printed total says about the extraction. */
-type TotalCheck = {
-  declaredTotal: number;
-  discrepancy: number;
-  matches: boolean;
-};
+/** One cent of slack absorbs the receipt's own rounding. */
+const TOTAL_TOLERANCE = 0.01;
 
 export function ReceiptScanner({
   groupId,
@@ -40,49 +36,43 @@ export function ReceiptScanner({
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState<OcrProgress | null>(null);
-  const [totalCheck, setTotalCheck] = useState<TotalCheck | null>(null);
+  const [declaredTotal, setDeclaredTotal] = useState<number | null>(null);
   const [isSubmitting, startSubmit] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  function compressImage(file: File, maxDimension = 1536, quality = 0.8): Promise<File> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const { width, height } = img;
-        if (width <= maxDimension && height <= maxDimension && file.size <= 1024 * 1024) {
-          resolve(file);
-          return;
-        }
-        const scale = Math.min(maxDimension / width, maxDimension / height, 1);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(width * scale);
-        canvas.height = Math.round(height * scale);
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(
-          (blob) => {
-            resolve(new File([blob!], file.name, { type: "image/jpeg" }));
-          },
-          "image/jpeg",
-          quality
-        );
-      };
-      img.src = URL.createObjectURL(file);
-    });
+  /**
+   * Builds the on-screen thumbnail. Decodes through createImageBitmap — the same
+   * decoder the OCR path uses — so a format the recognizer can't handle fails
+   * here, at pick time, instead of showing a fine preview and then a mysterious
+   * scan error. Returns a data URL, so there's no object URL left to revoke.
+   */
+  async function buildPreview(file: File, maxDimension = 1536): Promise<string> {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(
+      maxDimension / bitmap.width,
+      maxDimension / bitmap.height,
+      1
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.8);
   }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
     setError(null);
-    // Keep the full-resolution original for OCR — detail is what the
-    // recognizer needs. The compressed copy is only for the on-screen preview.
+    // Keep the original for OCR — preprocessing scales it to what the
+    // recognizer wants. The preview copy is only for display.
     setFile(f);
-    compressImage(f).then((compressed) => {
-      const reader = new FileReader();
-      reader.onload = () => setPreview(reader.result as string);
-      reader.readAsDataURL(compressed);
-    });
+    buildPreview(f)
+      .then(setPreview)
+      .catch(() =>
+        setError("Couldn't read that image. Try a JPEG or PNG photo.")
+      );
   }
 
   async function handleScan() {
@@ -109,15 +99,7 @@ export function ReceiptScanner({
           splitMemberIds: new Set(members.map((m) => m.id)),
         }))
       );
-      setTotalCheck(
-        result.declaredTotal !== null && result.discrepancy !== null
-          ? {
-              declaredTotal: result.declaredTotal,
-              discrepancy: result.discrepancy,
-              matches: result.totalMatches === true,
-            }
-          : null
-      );
+      setDeclaredTotal(result.declaredTotal);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       setError(`Scan failed: ${message}`);
@@ -165,6 +147,13 @@ export function ReceiptScanner({
   const total = items?.reduce((s, i) => s + i.price, 0) ?? 0;
   const payerResult = computePayers(total, Array.from(paidBy), paidAmounts);
 
+  // Derived, not stored: the user edits prices in review, so a discrepancy
+  // captured at scan time would keep contradicting the live total and could
+  // never clear once they fixed the misread line.
+  const discrepancy =
+    declaredTotal !== null ? Math.round((total - declaredTotal) * 100) / 100 : null;
+  const totalMatches = discrepancy !== null && Math.abs(discrepancy) <= TOTAL_TOLERANCE;
+
   function handleSubmit() {
     if (!items || !payerResult.valid) return;
     startSubmit(async () => {
@@ -191,7 +180,7 @@ export function ReceiptScanner({
     setPaidAmounts({});
     setReceiptName("");
     setError(null);
-    setTotalCheck(null);
+    setDeclaredTotal(null);
     setProgress(null);
   }
 
@@ -373,6 +362,18 @@ export function ReceiptScanner({
                             </button>
                           </div>
 
+                          {/* Why this price is what it is — helps the review pass */}
+                          {(item.discounted || item.quantity) && (
+                            <p className="text-[11px] text-muted-foreground -mt-1">
+                              {[
+                                item.quantity ? `${item.quantity} × unit price` : null,
+                                item.discounted ? "discount applied" : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          )}
+
                           {/* Split selection per item — single scrollable row on mobile */}
                           <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:mx-0 sm:px-0">
                             {members.map((m) => (
@@ -396,32 +397,32 @@ export function ReceiptScanner({
                   </div>
 
                   {/* Cross-check against the total printed on the receipt */}
-                  {totalCheck && (
+                  {declaredTotal !== null && discrepancy !== null && (
                     <div
                       className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${
-                        totalCheck.matches
+                        totalMatches
                           ? "border-primary/30 bg-primary/5 text-primary"
                           : "border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-500"
                       }`}
                     >
-                      {totalCheck.matches ? (
+                      {totalMatches ? (
                         <Check className="size-4 shrink-0 mt-px" />
                       ) : (
                         <TriangleAlert className="size-4 shrink-0 mt-px" />
                       )}
                       <p className="leading-relaxed">
-                        {totalCheck.matches ? (
+                        {totalMatches ? (
                           <>
                             Items add up to the receipt total (&euro;
-                            {totalCheck.declaredTotal.toFixed(2)}).
+                            {declaredTotal.toFixed(2)}).
                           </>
                         ) : (
                           <>
-                            The receipt says &euro;{totalCheck.declaredTotal.toFixed(2)}, but
-                            these items add up to &euro;{total.toFixed(2)} —{" "}
-                            {totalCheck.discrepancy > 0 ? "over" : "short"} by &euro;
-                            {Math.abs(totalCheck.discrepancy).toFixed(2)}. Check for a missing
-                            or misread line.
+                            The receipt says &euro;{declaredTotal.toFixed(2)}, but these items
+                            add up to &euro;{total.toFixed(2)} —{" "}
+                            {discrepancy > 0 ? "over" : "short"} by &euro;
+                            {Math.abs(discrepancy).toFixed(2)}. Check for a missing or misread
+                            line.
                           </>
                         )}
                       </p>
@@ -442,7 +443,7 @@ export function ReceiptScanner({
                       onClick={() => {
                         setItems(null);
                         setError(null);
-                        setTotalCheck(null);
+                        setDeclaredTotal(null);
                       }}
                       className="flex-1 h-12 rounded-xl text-base"
                     >
