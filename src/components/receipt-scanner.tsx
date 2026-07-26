@@ -229,7 +229,9 @@ export function ReceiptScanner({
                     ref={fileRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
+                    // No `capture` attribute: it forces the camera and hides the
+                    // gallery, so a receipt already photographed can't be picked.
+                    // Without it mobile offers both camera and library.
                     onChange={handleFile}
                     className="hidden"
                   />

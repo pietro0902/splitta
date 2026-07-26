@@ -36,13 +36,26 @@ export function GroupCard({ group, index }: { group: GroupSummary; index: number
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (confirm("Delete this group?")) {
-                  removeGroupId(group.id);
-                  startTransition(() => deleteGroup(group.id));
+                if (
+                  confirm(
+                    `Delete "${group.name}"?\n\nThis erases the group and all its expenses for everyone in it, not just on this device. It can't be undone.`
+                  )
+                ) {
+                  // Drop it from the DB first: clearing the local list before a
+                  // failed delete would leave a group nobody can reach.
+                  startTransition(async () => {
+                    await deleteGroup(group.id);
+                    removeGroupId(group.id);
+                  });
                 }
               }}
               disabled={isPending}
-              className="opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+              aria-label={`Delete ${group.name}`}
+              // Visible by default; only pointer devices get the hover reveal.
+              // Tailwind compiles `hover:` inside @media (hover: hover), so a
+              // plain `opacity-0 group-hover:opacity-100` is permanently
+              // invisible on touch — which hid this button on phones entirely.
+              className="opacity-100 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all disabled:opacity-50"
             >
               <Trash2 className="size-4" />
             </button>
