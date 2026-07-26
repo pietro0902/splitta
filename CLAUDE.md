@@ -23,7 +23,11 @@ npm run db:migrate:local   # apply migrations/ to local D1 (wrangler --local)
 npm run db:migrate:remote  # apply migrations/ to the remote D1 database
 ```
 
-There is no test suite. Validate changes with `npm run lint` and `npm run build`.
+```bash
+npx tsx parser-check.mts   # exercise the receipt parser on text fixtures (no browser/OCR needed)
+```
+
+There is no test suite. Validate changes with `npm run lint` and `npm run build`. When touching receipt extraction, also run `parser-check.mts` — and add the failing receipt's OCR text as a new case when you hit one that scans badly.
 
 ## Database access — the dev/prod split (important)
 
@@ -47,7 +51,11 @@ Plain numbered SQL files in `migrations/` (`NNNN_name.sql`), applied in filename
 - **Routes**: `/` (group list), `/groups/[id]` (group detail with tabs: expenses, balances, settlements, shopping, analytics), `/invite/[token]` (join-by-link flow).
 - **Membership without auth**: which groups "you" belong to lives in `localStorage` via `src/lib/local-groups.ts` (`splitta-groups` key). Opening an invite link claims the group into your local list (`auto-claim-group` / `invite-client`). The server has no concept of users.
 - **Balances & settlements** are computed, not stored: `db.getBalances()` sums expenses + splits and applies recorded settlements; `db.getSettlements()` runs a greedy debtor/creditor matching to produce minimal "who pays whom" transfers. Recorded settlements (`settlements` table) are actual logged payments that offset balances.
-- **Receipt OCR**: `scanReceiptClaude` in `actions.ts` sends a receipt image to the Anthropic API (model `claude-sonnet-4-6`) with a strict prompt that returns a JSON array of `{name, price}`; the UI lets the user assign each line to members, then `createExpensesFromReceipt` writes them as one expense-per-item sharing a `receipt_id`.
+- **Receipt OCR runs entirely in the browser** — no API, no key, no per-scan cost, and the photo never leaves the device. Two modules, deliberately split:
+  - `src/lib/ocr.ts` (client-only) preprocesses the photo on a canvas (upscale → grayscale → Otsu binarization) and runs Tesseract.js WASM against it, returning raw text. Tesseract assets (~5 MB) load on demand from the CDN on first scan and are then cached in IndexedDB.
+  - `src/lib/receipt-parser.ts` is a **pure** module (no DOM, no network, no server imports): it turns that text into `{name, price}` items, folding discount lines into the item above, expanding `2 x 1,20` quantity lines, and dropping totals/IVA/payment bookkeeping. It also reads the printed `TOTALE` and returns it as a checksum — the scanner UI shows whether the extracted items add up, so misreads surface instead of passing silently.
+  - Tune extraction by editing the keyword lists and regexes at the top of `receipt-parser.ts`; because it's pure, you can exercise it on a text fixture without a browser.
+  - `createExpensesFromReceipt` then writes the reviewed items as one expense-per-item sharing a `receipt_id`.
 
 ## Data model (D1, see migrations/)
 
@@ -55,7 +63,7 @@ Plain numbered SQL files in `migrations/` (`NNNN_name.sql`), applied in filename
 
 ## Secrets / env
 
-`ANTHROPIC_API_KEY` (used by receipt OCR) and the D1 binding `DB` are typed in `src/env.d.ts` as `CloudflareEnv`. In production these come from the Worker environment / `wrangler secret`; for local dev put `ANTHROPIC_API_KEY` in `.dev.vars`. Never commit real secrets.
+The D1 binding `DB` is the only entry in `CloudflareEnv` (`src/env.d.ts`); in production it comes from the Worker environment. The app needs no API keys — receipt OCR runs client-side. Never commit real secrets.
 
 ## UI stack
 

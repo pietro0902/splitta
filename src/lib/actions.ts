@@ -2,8 +2,6 @@
 
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
-import Anthropic from "@anthropic-ai/sdk";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { computeSplits, splitsAreValid, SPLIT_MODES, type SplitInput, type SplitMode } from "@/lib/splits";
 import { payersAreValid, distributePayersOverLines, type PayerInput } from "@/lib/payers";
 
@@ -123,61 +121,6 @@ export async function addMember(formData: FormData) {
   await db.addMember(groupId, name, color);
   revalidatePath(`/groups/${groupId}`);
 }
-
-export type ReceiptItem = {
-  name: string;
-  price: number;
-};
-
-const OCR_PROMPT = `Extract all items and their final prices from this receipt.
-Rules:
-- If a discount line follows a product (e.g. "Sconto 40%", "Sconto Carta", or a negative price), apply the discount to that product and return the net price (product price minus discount).
-- Do NOT include discount lines as separate items.
-- Do NOT include totals, subtotals, tax (IVA), or payment lines.
-- Skip items you cannot read clearly.
-Return ONLY a JSON array, no other text. Format: [{"name": "item name", "price": 1.23}].`;
-
-export async function scanReceiptClaude(formData: FormData) {
-  const file = formData.get("image") as File;
-  if (!file) return { error: "No image provided", items: [] as ReceiptItem[] };
-
-  const { env } = await getCloudflareContext<{ env: CloudflareEnv }>({ async: true });
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { error: "ANTHROPIC_API_KEY not configured", items: [] as ReceiptItem[] };
-
-  try {
-    const bytes = await file.arrayBuffer();
-    const base64 = Buffer.from(bytes).toString("base64");
-    const mediaType = file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-
-    const anthropic = new Anthropic({ apiKey });
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-            { type: "text", text: OCR_PROMPT },
-          ],
-        },
-      ],
-    });
-
-    const text = response.content.find((c) => c.type === "text")?.text ?? "[]";
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return { error: "Could not parse receipt", items: [] as ReceiptItem[] };
-
-    const items: ReceiptItem[] = JSON.parse(jsonMatch[0]);
-    return { items };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("Claude OCR error:", msg, e);
-    return { error: `Scan failed: ${msg}`, items: [] as ReceiptItem[] };
-  }
-}
-
 
 export async function createExpensesFromReceipt(
   groupId: number,

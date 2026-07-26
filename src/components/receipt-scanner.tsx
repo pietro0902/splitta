@@ -2,20 +2,25 @@
 
 import { useState, useTransition, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Camera, X, Loader2 } from "lucide-react";
+import { Camera, X, Loader2, Check, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
 import { PayerEditor } from "@/components/payer-editor";
 import { computePayers } from "@/lib/payers";
-import {
-  scanReceiptClaude,
-  createExpensesFromReceipt,
-} from "@/lib/actions";
-import type { ReceiptItem } from "@/lib/actions";
+import { createExpensesFromReceipt } from "@/lib/actions";
+import { recognizeReceipt, type OcrProgress } from "@/lib/ocr";
+import { parseReceipt, type ParsedItem } from "@/lib/receipt-parser";
 import type { Member } from "@/lib/db-types";
 
-type ItemWithSplits = ReceiptItem & {
+type ItemWithSplits = ParsedItem & {
   splitMemberIds: Set<number>;
+};
+
+/** What the receipt's own printed total says about the extraction. */
+type TotalCheck = {
+  declaredTotal: number;
+  discrepancy: number;
+  matches: boolean;
 };
 
 export function ReceiptScanner({
@@ -33,7 +38,9 @@ export function ReceiptScanner({
   const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>({});
   const [receiptName, setReceiptName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isScanning, startScan] = useTransition();
+  const [isScanning, setIsScanning] = useState(false);
+  const [progress, setProgress] = useState<OcrProgress | null>(null);
+  const [totalCheck, setTotalCheck] = useState<TotalCheck | null>(null);
   const [isSubmitting, startSubmit] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -68,33 +75,56 @@ export function ReceiptScanner({
     const f = e.target.files?.[0];
     if (!f) return;
     setError(null);
+    // Keep the full-resolution original for OCR — detail is what the
+    // recognizer needs. The compressed copy is only for the on-screen preview.
+    setFile(f);
     compressImage(f).then((compressed) => {
-      setFile(compressed);
       const reader = new FileReader();
       reader.onload = () => setPreview(reader.result as string);
       reader.readAsDataURL(compressed);
     });
   }
 
-  function handleScan() {
+  async function handleScan() {
     if (!file) return;
-    const formData = new FormData();
-    formData.set("image", file);
 
-    startScan(async () => {
-      const result = await scanReceiptClaude(formData);
-      if (result.error) {
-        setError(result.error);
-      } else {
-        setItems(
-          result.items.map((item) => ({
-            ...item,
-            splitMemberIds: new Set(members.map((m) => m.id)),
-          }))
+    setIsScanning(true);
+    setError(null);
+    setProgress({ ratio: 0, label: "Starting" });
+
+    try {
+      const text = await recognizeReceipt(file, setProgress);
+      const result = parseReceipt(text);
+
+      if (result.items.length === 0) {
+        setError(
+          "Couldn't read any items. Try a straighter, better-lit photo of the receipt."
         );
-        setError(null);
+        return;
       }
-    });
+
+      setItems(
+        result.items.map((item) => ({
+          ...item,
+          splitMemberIds: new Set(members.map((m) => m.id)),
+        }))
+      );
+      setTotalCheck(
+        result.declaredTotal !== null && result.discrepancy !== null
+          ? {
+              declaredTotal: result.declaredTotal,
+              discrepancy: result.discrepancy,
+              matches: result.totalMatches === true,
+            }
+          : null
+      );
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(`Scan failed: ${message}`);
+    } finally {
+      setIsScanning(false);
+      setProgress(null);
+    }
   }
 
   function toggleItemSplit(itemIndex: number, memberId: number) {
@@ -161,6 +191,8 @@ export function ReceiptScanner({
     setPaidAmounts({});
     setReceiptName("");
     setError(null);
+    setTotalCheck(null);
+    setProgress(null);
   }
 
   return (
@@ -244,6 +276,21 @@ export function ReceiptScanner({
 
                   {error && (
                     <p className="text-sm text-destructive text-center">{error}</p>
+                  )}
+
+                  {isScanning && progress && (
+                    <div className="space-y-2">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <motion.div
+                          className="h-full rounded-full bg-primary"
+                          animate={{ width: `${Math.round(progress.ratio * 100)}%` }}
+                          transition={{ ease: "easeOut", duration: 0.3 }}
+                        />
+                      </div>
+                      <p className="text-center text-xs text-muted-foreground">
+                        {progress.label} — runs on your device, nothing is uploaded
+                      </p>
+                    </div>
                   )}
 
                   <Button
@@ -348,6 +395,39 @@ export function ReceiptScanner({
                     </div>
                   </div>
 
+                  {/* Cross-check against the total printed on the receipt */}
+                  {totalCheck && (
+                    <div
+                      className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${
+                        totalCheck.matches
+                          ? "border-primary/30 bg-primary/5 text-primary"
+                          : "border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-500"
+                      }`}
+                    >
+                      {totalCheck.matches ? (
+                        <Check className="size-4 shrink-0 mt-px" />
+                      ) : (
+                        <TriangleAlert className="size-4 shrink-0 mt-px" />
+                      )}
+                      <p className="leading-relaxed">
+                        {totalCheck.matches ? (
+                          <>
+                            Items add up to the receipt total (&euro;
+                            {totalCheck.declaredTotal.toFixed(2)}).
+                          </>
+                        ) : (
+                          <>
+                            The receipt says &euro;{totalCheck.declaredTotal.toFixed(2)}, but
+                            these items add up to &euro;{total.toFixed(2)} —{" "}
+                            {totalCheck.discrepancy > 0 ? "over" : "short"} by &euro;
+                            {Math.abs(totalCheck.discrepancy).toFixed(2)}. Check for a missing
+                            or misread line.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Total & submit */}
                   <div className="flex items-center justify-between pt-2 border-t border-border">
                     <span className="text-sm font-medium text-muted-foreground">Total</span>
@@ -362,6 +442,7 @@ export function ReceiptScanner({
                       onClick={() => {
                         setItems(null);
                         setError(null);
+                        setTotalCheck(null);
                       }}
                       className="flex-1 h-12 rounded-xl text-base"
                     >
