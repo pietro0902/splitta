@@ -33,11 +33,19 @@ export type ParsedReceipt = {
 const NON_ITEM_KEYWORDS = [
   "TOTALE", "TOT", "SUBTOTALE", "IMPORTO", "IMPONIBILE", "CORRISPETTIVO",
   "IVA", "ESENTE", "ESENZIONE", "ALIQUOTA",
-  "CONTANTE", "CONTANTI", "RESTO", "CARTA", "BANCOMAT", "POS", "ELETTRONICO",
+  "CONTANTE", "CONTANTI", "RESTO", "BANCOMAT", "POS", "ELETTRONICO",
+  // Not a bare "CARTA": that is a real product word ("Menu Carta", "carta
+  // forno", "carta igienica") and blacklisting it drops genuine items.
+  "CARTA DI CREDITO", "CARTA CREDITO", "CARTA DI DEBITO", "PAG. CARTA",
   "PAGAMENTO", "PAGATO", "NON RISCOSSO", "ARROTONDAMENTO",
   "DOCUMENTO COMMERCIALE", "SCONTRINO", "REGISTRATORE", "MATRICOLA", "RT",
   "PARTITA IVA", "P.IVA", "PIVA", "COD.FISCALE", "CODICE FISCALE",
   "CASSA", "OPERATORE", "ADDETTO", "CASSIERE",
+  // Column headers and docket metadata seen on real receipts.
+  "DESCRIZIONE", "DESCR", "PREZZO", "QUANTITA", "QTA", "ARTICOLO",
+  "DOCUMENTO GESTIONALE", "NET TOTAL", "SUBTOTAL", "CHK", "TBL",
+  // A bare "EURO" is the price-column header, never a product.
+  "EURO",
   "GRAZIE", "ARRIVEDERCI", "SCONTRINO PARLANTE",
   "PUNTI", "FIDELITY", "SALDO PUNTI", "TESSERA", "CLIENTE",
   "ARTICOLI", "PEZZI", "CAPI",
@@ -55,7 +63,17 @@ const DISCOUNT_KEYWORDS = [
 const TOTAL_KEYWORDS = [
   "TOTALE COMPLESSIVO", "TOTALE EURO", "TOTALE DA PAGARE", "TOTALE",
   "TOT. EURO", "TOT EURO", "TOT.", "IMPORTO PAGATO",
+  // English receipts (tourist areas print these) — "TOTAL" alone covers
+  // "TOTAL EUR" and "GRAND TOTAL".
+  "TOTAL",
 ];
+
+/**
+ * Words that disqualify a line from being *the* total even though it contains a
+ * total keyword: a VAT recap restates a tax slice, and "Net Total" is the
+ * taxable base, which is smaller than what was actually paid.
+ */
+const NOT_THE_TOTAL = /\b(IVA|VAT|NET|IMPONIBILE)\b/;
 
 /**
  * A price at the end of a line: "1,50", "-0,96", "12.99", optionally trailed
@@ -75,6 +93,14 @@ const TRAILING_PRICE_LOOSE =
 function matchTrailingPrice(line: string): RegExpMatchArray | null {
   return line.match(TRAILING_PRICE) ?? line.match(TRAILING_PRICE_LOOSE);
 }
+
+/**
+ * "2 water still @ 12.00" — quantity in front, unit price after an @ marker,
+ * line total further right (the caller strips it before matching). Common on
+ * restaurant dockets. OCR frequently reads "@" as "6" or "€", and sometimes
+ * glues a stray character to it, so both are tolerated.
+ */
+const QTY_AT_UNIT_PRICE = /^\s*(\d{1,3})\s+(.+?)\s*[@€6GEe][^\d]{0,3}\d{1,4}[.,]\d{2}\s*$/;
 
 /** "2 x 1,20" / "2X1,20" / "0,450 kg x 12,90" — a quantity line. */
 const QUANTITY_LINE =
@@ -135,8 +161,7 @@ function findTotal(lines: string[]): { value: number | null; index: number } {
   for (let i = lines.length - 1; i >= 0; i--) {
     const normalized = normalize(lines[i]);
     if (!containsKeyword(normalized, TOTAL_KEYWORDS)) continue;
-    // Reject the VAT recap lines ("TOTALE IVA 22%"), which restate a tax slice.
-    if (/\bIVA\b/.test(normalized)) continue;
+    if (NOT_THE_TOTAL.test(normalized)) continue;
 
     const match = matchTrailingPrice(lines[i]);
     if (match) {
@@ -216,24 +241,35 @@ export function parseReceipt(text: string): ParsedReceipt {
       // The product name is usually on the preceding line, which had no price.
       const previousRaw = i > 0 ? cleanName(body[i - 1]) : "";
       const previousHadPrice = i > 0 && matchTrailingPrice(body[i - 1]) !== null;
+      const previousIsNoise =
+        i > 0 && containsKeyword(normalize(body[i - 1]), NON_ITEM_KEYWORDS);
+      const previousIsName =
+        !previousHadPrice &&
+        !previousIsNoise &&
+        previousRaw.length > 0 &&
+        !CODE_ONLY.test(previousRaw);
 
-      if (!previousHadPrice && previousRaw && !CODE_ONLY.test(previousRaw)) {
+      if (restPrice !== null) {
+        // The line carries its own total, so it *is* the item. Name it from the
+        // line above when that line was a bare product name.
+        items.push({
+          name: previousIsName ? previousRaw : UNNAMED_ITEM,
+          price: lineTotal,
+          quantity: quantity ?? undefined,
+        });
+      } else if (previousIsName) {
+        // "PANE" / "2 x 1,20" — no total printed, so multiply.
         items.push({
           name: previousRaw,
           price: lineTotal,
           quantity: quantity ?? undefined,
         });
-      } else {
-        // The preceding line was already a complete item (name + price), so this
-        // quantity line belongs to a different product whose name OCR lost.
-        // Emit it separately — overwriting the previous item's price would
-        // corrupt that product *and* drop this one.
-        items.push({
-          name: UNNAMED_ITEM,
-          price: lineTotal,
-          quantity: quantity ?? undefined,
-        });
       }
+      // Otherwise this is an informational quantity line printed *above* its
+      // product ("2 X 2,00" then "Menu Carta  4,00"): the price belongs to the
+      // line below, which is parsed on its own. Emitting anything here would
+      // invent a phantom item — which is how a column header once became a
+      // EUR 4.00 expense.
       continue;
     }
 
@@ -241,14 +277,23 @@ export function parseReceipt(text: string): ParsedReceipt {
     if (containsKeyword(normalized, NON_ITEM_KEYWORDS)) continue;
 
     // --- Regular item line ------------------------------------------------
-    if (priceMatch && priceValue !== null && priceValue > 0) {
-      const name = cleanName(line.slice(0, priceMatch.index));
+    // Zero-priced lines are real items (a comped cover charge, "8 OSHIBORI
+    // 0.00"): keeping them costs nothing in the total and preserves the
+    // receipt's line count.
+    if (priceMatch && priceValue !== null && priceValue >= 0) {
+      const raw = line.slice(0, priceMatch.index);
+      const unitPriced = raw.match(QTY_AT_UNIT_PRICE);
+      const name = cleanName(unitPriced ? unitPriced[2] : raw);
       // Keep priced lines whose name didn't survive OCR (bare EAN codes, smudged
       // text) under a placeholder rather than dropping them: silently discarding
       // a real line would break the total checksum, which is the one signal the
       // user has that the scan is complete. They can rename it in review.
       const usable = name && !CODE_ONLY.test(name) && name.length >= 2;
-      items.push({ name: usable ? name : UNNAMED_ITEM, price: priceValue });
+      items.push({
+        name: usable ? name : UNNAMED_ITEM,
+        price: priceValue,
+        quantity: unitPriced ? toAmount(unitPriced[1]) ?? undefined : undefined,
+      });
     }
     // Lines without a price are either a name awaiting a quantity line
     // (handled above) or noise. Either way, nothing to emit here.

@@ -17,6 +17,75 @@ export type OcrProgress = {
 };
 
 /**
+ * Sauvola local adaptive threshold, in place.
+ *
+ * A single global cut (Otsu) assumes even lighting; a receipt is usually
+ * crumpled and lit from one side, so one threshold blows out the bright half
+ * and fills the shadowed half with noise. Sauvola picks a threshold per pixel
+ * from the local mean and standard deviation:
+ *
+ *   T(x,y) = mean * (1 + k * (stddev / R - 1))
+ *
+ * Measured against the previous global Otsu on three real receipts: same or
+ * better price recovery, and it stopped inventing spurious line items.
+ *
+ * Window mean/variance come from integral images, so cost is independent of
+ * window size. `sum` fits in Uint32 (pixels * 255 stays under 2^32 for any
+ * image this pipeline produces); the squares need Float64.
+ */
+function sauvolaThreshold(
+  gray: Uint8ClampedArray,
+  width: number,
+  height: number,
+  k = 0.2
+): void {
+  // ~2.5% of the short edge: wide enough to span a stroke and its background,
+  // narrow enough to track shading across the receipt. Forced odd.
+  const window = Math.max(15, (Math.round(Math.min(width, height) / 40) | 1));
+  const radius = Math.floor(window / 2);
+
+  const stride = width + 1;
+  const sum = new Uint32Array(stride * (height + 1));
+  const sqsum = new Float64Array(stride * (height + 1));
+
+  for (let y = 0; y < height; y++) {
+    let rowSum = 0;
+    let rowSq = 0;
+    for (let x = 0; x < width; x++) {
+      const value = gray[y * width + x];
+      rowSum += value;
+      rowSq += value * value;
+      sum[(y + 1) * stride + x + 1] = sum[y * stride + x + 1] + rowSum;
+      sqsum[(y + 1) * stride + x + 1] = sqsum[y * stride + x + 1] + rowSq;
+    }
+  }
+
+  const R = 128;
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(height, y + radius + 1);
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width, x + radius + 1);
+      const count = (x1 - x0) * (y1 - y0);
+
+      const s =
+        sum[y1 * stride + x1] - sum[y0 * stride + x1] -
+        sum[y1 * stride + x0] + sum[y0 * stride + x0];
+      const sq =
+        sqsum[y1 * stride + x1] - sqsum[y0 * stride + x1] -
+        sqsum[y1 * stride + x0] + sqsum[y0 * stride + x0];
+
+      const mean = s / count;
+      const stddev = Math.sqrt(Math.max(0, sq / count - mean * mean));
+      const threshold = mean * (1 + k * (stddev / R - 1));
+
+      gray[y * width + x] = gray[y * width + x] > threshold ? 255 : 0;
+    }
+  }
+}
+
+/**
  * Thermal receipts are low-contrast and often photographed at an angle.
  * Tesseract wants dark text on a clean white field at roughly 300 DPI, so we
  * upscale small photos, drop to grayscale, stretch the contrast, and binarize.
@@ -47,59 +116,19 @@ async function preprocess(
 
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const pixels = image.data;
+  const width = canvas.width;
+  const height = canvas.height;
 
-  // Grayscale (luma) + histogram, in one pass.
-  const histogram = new Uint32Array(256);
+  // Grayscale (luma).
   const gray = new Uint8ClampedArray(pixels.length / 4);
   for (let i = 0, g = 0; i < pixels.length; i += 4, g++) {
-    const value =
-      (pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114) | 0;
-    gray[g] = value;
-    histogram[value]++;
+    gray[g] = (pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114) | 0;
   }
 
-  // Otsu's method: pick the threshold that maximizes between-class variance.
-  const total = gray.length;
-  let sum = 0;
-  for (let t = 0; t < 256; t++) sum += t * histogram[t];
+  sauvolaThreshold(gray, width, height);
 
-  let sumBackground = 0;
-  let weightBackground = 0;
-  let maxVariance = -1;
-  let threshold = 128;
-
-  for (let t = 0; t < 256; t++) {
-    weightBackground += histogram[t];
-    if (weightBackground === 0) continue;
-    const weightForeground = total - weightBackground;
-    if (weightForeground === 0) break;
-
-    sumBackground += t * histogram[t];
-    const meanBackground = sumBackground / weightBackground;
-    const meanForeground = (sum - sumBackground) / weightForeground;
-    const variance =
-      weightBackground *
-      weightForeground *
-      (meanBackground - meanForeground) ** 2;
-
-    if (variance > maxVariance) {
-      maxVariance = variance;
-      threshold = t;
-    }
-  }
-
-  // Soft binarization: a hard cut at the threshold erases thin strokes on
-  // faded thermal print, so ramp across a band around it instead.
-  const band = 28;
-  const low = threshold - band;
-  const high = threshold + band;
   for (let i = 0, g = 0; i < pixels.length; i += 4, g++) {
-    const value = gray[g];
-    let out: number;
-    if (value <= low) out = 0;
-    else if (value >= high) out = 255;
-    else out = ((value - low) / (high - low)) * 255;
-    pixels[i] = pixels[i + 1] = pixels[i + 2] = out;
+    pixels[i] = pixels[i + 1] = pixels[i + 2] = gray[g];
     pixels[i + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);

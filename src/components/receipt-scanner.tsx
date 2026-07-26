@@ -430,6 +430,20 @@ export function ReceiptScanner({
                   </div>
 
                   {/* Cross-check against the total printed on the receipt */}
+                  {/* No printed total means no automatic cross-check. Say so:
+                      an absent banner would read as "all good" when in fact
+                      nothing was verified. */}
+                  {declaredTotal === null && (
+                    <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                      <TriangleAlert className="size-4 shrink-0 mt-px" />
+                      <p className="leading-relaxed">
+                        Couldn&apos;t read the total printed on the receipt, so these{" "}
+                        {items.length} items can&apos;t be checked automatically. Compare
+                        them with the receipt before adding.
+                      </p>
+                    </div>
+                  )}
+
                   {declaredTotal !== null && discrepancy !== null && (
                     <div
                       className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${

@@ -100,6 +100,58 @@ TOTALE                   8,60
     expectMatch: true,
   },
   {
+    // Real OCR output, Trattoria Il Gabbiano. The "EURO" header followed by a
+    // standalone "2X 2,00" used to invent a phantom EUR 4,00 item named EURO,
+    // because the quantity line took its name from the line above.
+    label: "real OCR: informational quantity line above its product",
+    text: `
+Trattoria I] Gabbiano
+P. Iva: 01522310180
+
+EURO
+2X 2,00
+
+Menu Carta                                 4,00
+Gnocchi rosa                      10,00
+Ravioli Castalmagno                   12,00
+Stinco                                12,00
+CONTANTI                               89,00
+`,
+    expected: [
+      ["Menu Carta", 4],
+      ["Gnocchi rosa", 10],
+      ["Ravioli Castalmagno", 12],
+      ["Stinco", 12],
+    ],
+    expectTotal: null,
+    expectMatch: null,
+  },
+  {
+    // Real OCR output, Zuma. Restaurant docket format: quantity in front, unit
+    // price after an @ that OCR renders as "€" or "G", line total at the right.
+    label: "real OCR: quantity-first docket with @ unit prices",
+    text: `
+ZUMA  RESTAURANT
+CHK 3288        TBL 5/1
+2 water still € 12.00       24.00
+8 OSHIBORI                0.00
+2 Coperto G 15.00           30.00
+1 seared tuna               39.00
+48.36 IVA 10%
+Net Total:            483 CEL
+`,
+    expected: [
+      // Quantity and unit price stripped from the name.
+      ["water still", 24],
+      // A zero-priced line is still a real item.
+      ["8 OSHIBORI", 0],
+      ["Coperto", 30],
+      ["1 seared tuna", 39],
+    ],
+    expectTotal: null,
+    expectMatch: null,
+  },
+  {
     label: "no printed total: checksum unavailable, items still extracted",
     text: `
 BAR CENTRALE
