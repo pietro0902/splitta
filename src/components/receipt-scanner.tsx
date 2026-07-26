@@ -2,7 +2,14 @@
 
 import { useState, useTransition, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Camera, X, Loader2, Check, TriangleAlert } from "lucide-react";
+import {
+  Camera,
+  X,
+  Loader2,
+  Check,
+  TriangleAlert,
+  Image as ImageIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
 import { PayerEditor } from "@/components/payer-editor";
@@ -39,6 +46,7 @@ export function ReceiptScanner({
   const [declaredTotal, setDeclaredTotal] = useState<number | null>(null);
   const [isSubmitting, startSubmit] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   /**
    * Builds the on-screen thumbnail. Decodes through createImageBitmap — the same
@@ -64,6 +72,9 @@ export function ReceiptScanner({
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+    // Clear the input so picking the same file again still fires onChange —
+    // otherwise re-selecting a photo after removing the preview does nothing.
+    e.target.value = "";
     setError(null);
     // Keep the original for OCR — preprocessing scales it to what the
     // recognizer wants. The preview copy is only for display.
@@ -224,14 +235,23 @@ export function ReceiptScanner({
 
               {!items ? (
                 <div className="space-y-5">
-                  {/* Upload area */}
+                  {/* Two inputs, two buttons: `capture` opens the camera but
+                      suppresses the gallery, and dropping it lets the OS decide
+                      — which on some phones means the gallery only. Neither
+                      single input can offer both reliably, so make the choice
+                      explicit instead of leaving it to the platform. */}
+                  <input
+                    ref={cameraRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFile}
+                    className="hidden"
+                  />
                   <input
                     ref={fileRef}
                     type="file"
                     accept="image/*"
-                    // No `capture` attribute: it forces the camera and hides the
-                    // gallery, so a receipt already photographed can't be picked.
-                    // Without it mobile offers both camera and library.
                     onChange={handleFile}
                     className="hidden"
                   />
@@ -254,15 +274,26 @@ export function ReceiptScanner({
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => fileRef.current?.click()}
-                      className="w-full rounded-xl border-2 border-dashed border-border bg-muted/30 px-4 py-12 text-center hover:border-primary/50 hover:bg-muted/50 transition-all"
-                    >
-                      <Camera className="size-8 mx-auto mb-3 text-muted-foreground" />
-                      <p className="text-sm font-medium text-muted-foreground">
-                        Tap to take a photo or upload
-                      </p>
-                    </button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => cameraRef.current?.click()}
+                        className="rounded-xl border-2 border-dashed border-border bg-muted/30 px-4 py-10 text-center hover:border-primary/50 hover:bg-muted/50 transition-all"
+                      >
+                        <Camera className="size-7 mx-auto mb-2.5 text-muted-foreground" />
+                        <p className="text-sm font-medium text-muted-foreground">
+                          Take a photo
+                        </p>
+                      </button>
+                      <button
+                        onClick={() => fileRef.current?.click()}
+                        className="rounded-xl border-2 border-dashed border-border bg-muted/30 px-4 py-10 text-center hover:border-primary/50 hover:bg-muted/50 transition-all"
+                      >
+                        <ImageIcon className="size-7 mx-auto mb-2.5 text-muted-foreground" />
+                        <p className="text-sm font-medium text-muted-foreground">
+                          From gallery
+                        </p>
+                      </button>
+                    </div>
                   )}
 
                   {error && (
