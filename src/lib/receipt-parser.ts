@@ -79,7 +79,18 @@ const NOT_THE_TOTAL = /\b(IVA|VAT|NET|IMPONIBILE)\b/;
  * A price at the end of a line: "1,50", "-0,96", "12.99", optionally trailed
  * by a VAT/department marker ("1,50 A", "1,50 22", "1,50 *").
  */
-const TRAILING_PRICE = /(-?\d{1,5}[.,]\d{2})\s*[A-Z*€]{0,3}\s*$/;
+// `\s*` around the separator: OCR sprays stray spaces into numbers, and
+// "532. 00EUR" is a total that would otherwise go unread.
+const TRAILING_PRICE = /(-?\d{1,5}\s*[.,]\s*\d{2})\s*[A-Z*€]{0,3}\s*$/;
+
+/**
+ * A line that is nothing but an amount. Near the end of a receipt these are
+ * the total or a payment restatement printed without a label — never products.
+ */
+const AMOUNT_ONLY = /^[\s€$*]*(-?\d{1,5}\s*[.,]\s*\d{2})\s*(?:EUR|EURO|€|\$)?\s*$/i;
+
+/** Fraction of the receipt after which an unlabelled amount is bookkeeping. */
+const TAIL_FROM = 0.6;
 
 /**
  * Same shape, but tolerating the letters OCR substitutes for digits on faded
@@ -100,7 +111,23 @@ function matchTrailingPrice(line: string): RegExpMatchArray | null {
  * restaurant dockets. OCR frequently reads "@" as "6" or "€", and sometimes
  * glues a stray character to it, so both are tolerated.
  */
-const QTY_AT_UNIT_PRICE = /^\s*(\d{1,3})\s+(.+?)\s*[@€6GEe][^\d]{0,3}\d{1,4}[.,]\d{2}\s*$/;
+// The "@" marker: literal @/€ may sit flush against the name, but the letters
+// OCR substitutes for it (6, G, E, e) must stand alone as their own token —
+// otherwise the trailing "e" of "chocolate" is read as the marker and eaten.
+const AT_MARKER = String.raw`(?:\s[6GEe]|\s*[@€])`;
+
+const QTY_AT_UNIT_PRICE = new RegExp(
+  String.raw`^\s*(\d{1,3})\s+(.+?)${AT_MARKER}[^\d]{0,3}\d{1,4}[.,]\d{2}\s*$`
+);
+
+/**
+ * Same shape without the end anchor, for when OCR mangles the line total but
+ * leaves "N name @ unit" intact ("2 special chocolate @ 23.00 4" — the 46.00
+ * was split across two lines). The total is then reconstructable as N × unit.
+ */
+const QTY_AT_UNIT_LOOSE = new RegExp(
+  String.raw`^\s*(\d{1,3})\s+(.+?)${AT_MARKER}[^\d]{0,3}(\d{1,4}[.,]\d{2})`
+);
 
 /** "2 x 1,20" / "2X1,20" / "0,450 kg x 12,90" — a quantity line. */
 const QUANTITY_LINE =
@@ -195,12 +222,24 @@ export function parseReceipt(text: string): ParsedReceipt {
   const body = totalIndex >= 0 ? rawLines.slice(0, totalIndex) : rawLines;
 
   const items: ParsedItem[] = [];
+  // Unlabelled amounts printed near the bottom — candidates for the total when
+  // no keyword line survived OCR.
+  const tailAmounts: number[] = [];
+  const tailStart = Math.floor(body.length * TAIL_FROM);
 
   for (let i = 0; i < body.length; i++) {
     const line = body[i];
     const normalized = normalize(line);
 
     if (normalized.length < 2) continue;
+
+    // A bare amount in the tail is the total or a payment echo, not an item.
+    const amountOnly = line.match(AMOUNT_ONLY);
+    if (amountOnly && i >= tailStart) {
+      const value = toAmount(amountOnly[1]);
+      if (value !== null && value > 0) tailAmounts.push(value);
+      continue;
+    }
 
     const priceMatch = matchTrailingPrice(line);
     const quantityMatch = line.match(QUANTITY_LINE);
@@ -294,18 +333,46 @@ export function parseReceipt(text: string): ParsedReceipt {
         price: priceValue,
         quantity: unitPriced ? toAmount(unitPriced[1]) ?? undefined : undefined,
       });
+      continue;
+    }
+
+    // No readable line total, but the line still spells out quantity and unit
+    // price — rebuild it rather than dropping a real item.
+    const rebuilt = line.match(QTY_AT_UNIT_LOOSE);
+    if (rebuilt) {
+      const count = toAmount(rebuilt[1]);
+      const unit = toAmount(rebuilt[3]);
+      if (count !== null && unit !== null && count > 0 && unit > 0) {
+        const name = cleanName(rebuilt[2]);
+        const usable = name.length >= 2 && !CODE_ONLY.test(name);
+        items.push({
+          name: usable ? name : UNNAMED_ITEM,
+          price: roundCents(count * unit),
+          quantity: count,
+        });
+      }
     }
     // Lines without a price are either a name awaiting a quantity line
     // (handled above) or noise. Either way, nothing to emit here.
   }
 
   const itemsTotal = roundCents(items.reduce((sum, item) => sum + item.price, 0));
-  const discrepancy =
-    declaredTotal !== null ? roundCents(itemsTotal - declaredTotal) : null;
+
+  // Fall back to the largest unlabelled amount in the tail when the labelled
+  // total didn't survive OCR — on a crumpled receipt "TOTALE" often doesn't.
+  // Only accept one at least as large as the items, which rules out change due
+  // and partial payments; a total below its own line items is not a total.
+  let total = declaredTotal;
+  if (total === null && tailAmounts.length > 0) {
+    const candidate = Math.max(...tailAmounts);
+    if (candidate >= itemsTotal) total = candidate;
+  }
+
+  const discrepancy = total !== null ? roundCents(itemsTotal - total) : null;
 
   return {
     items,
-    declaredTotal,
+    declaredTotal: total,
     itemsTotal,
     // One cent of slack absorbs the receipt's own rounding.
     totalMatches: discrepancy === null ? null : Math.abs(discrepancy) <= 0.01,

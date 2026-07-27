@@ -137,8 +137,12 @@ CHK 3288        TBL 5/1
 8 OSHIBORI                0.00
 2 Coperto G 15.00           30.00
 1 seared tuna               39.00
+2 special] chocolate @ 23.00 4
+.    6.00
 48.36 IVA 10%
 Net Total:            483 CEL
+
+145. 00EUR
 `,
     expected: [
       // Quantity and unit price stripped from the name.
@@ -147,9 +151,17 @@ Net Total:            483 CEL
       ["8 OSHIBORI", 0],
       ["Coperto", 30],
       ["1 seared tuna", 39],
+      // OCR split "46.00" across two lines, destroying the line total. The
+      // "@ 23.00" with quantity 2 is enough to rebuild it.
+      ["special] chocolate", 46],
+      // ...and the orphaned fragment survives as an unnamed item, which is
+      // what keeps the checksum honest instead of silently absorbing it.
+      [UNNAMED_ITEM, 6],
     ],
-    expectTotal: null,
-    expectMatch: null,
+    // No labelled total survived ("Net Total" is the taxable base and is
+    // excluded), so the bare amount at the bottom is used instead.
+    expectTotal: 145,
+    expectMatch: true,
   },
   {
     label: "no printed total: checksum unavailable, items still extracted",
