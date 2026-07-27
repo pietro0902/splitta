@@ -489,6 +489,66 @@ function withoutTotalAsItem(run: ParsedReceipt, total: number): ParsedReceipt {
   return { ...run, items, itemsTotal };
 }
 
+/**
+ * Removes items that are really the *unit price* of another item, when doing so
+ * makes the receipt add up.
+ *
+ * A quantity line ("2 x 5,50") whose marker OCR mangled gets read as a product
+ * priced 5.50, sitting beside the genuine 11.00 line it belongs to. The
+ * signature is exact: the phantom's price times a small integer equals another
+ * item's price. On the Bar Rosati photo, dropping 5.50 (half of 11) and 10.00
+ * (half of 20) leaves 11 + 20 + 5.89 = 36.89 against the printed 36.88.
+ *
+ * Deliberately not a general subset-sum over all items: that finds a
+ * coincidental combination on almost any receipt and reports it as verified.
+ * Measured — an unrestricted search "reconciled" a 4-item receipt by discarding
+ * two real items, and turned the checksum green on a wrong answer.
+ */
+function dropUnitPriceEchoes(items: ParsedItem[], total: number): ParsedItem[] | null {
+  if (items.length < 2) return null;
+
+  const cents = items.map((item) => Math.round(item.price * 100));
+  const targetCents = Math.round(total * 100);
+  const slack = Math.round(TOTAL_TOLERANCE * 100);
+
+  // Multipliers stay small: a real product can easily be a tenth of another,
+  // but "half" or "a third" is the shape a quantity line actually takes.
+  const suspects = cents
+    .map((value, index) => ({ value, index }))
+    .filter(({ value }) => value > 0)
+    .filter(({ value, index }) =>
+      cents.some((other, j) => {
+        if (j === index || other <= value) return false;
+        for (let n = 2; n <= 5; n++) if (Math.abs(value * n - other) <= 1) return true;
+        return false;
+      })
+    )
+    .map(({ index }) => index);
+
+  if (suspects.length === 0 || suspects.length > 6) return null;
+
+  const sumAll = cents.reduce((a, b) => a + b, 0);
+
+  // Try every combination of suspects, fewest removals first.
+  for (let size = 1; size <= suspects.length; size++) {
+    const combos: number[][] = [];
+    const build = (start: number, current: number[]) => {
+      if (current.length === size) { combos.push([...current]); return; }
+      for (let i = start; i < suspects.length; i++) build(i + 1, [...current, suspects[i]]);
+    };
+    build(0, []);
+
+    for (const combo of combos) {
+      const removed = combo.reduce((sum, i) => sum + cents[i], 0);
+      if (Math.abs(sumAll - removed - targetCents) <= slack) {
+        const drop = new Set(combo);
+        return items.filter((_, i) => !drop.has(i));
+      }
+    }
+  }
+  return null;
+}
+
 export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
   const usable = runs.filter((run) => run.items.length > 0);
   if (usable.length === 0) return runs[0] ?? withTotal({ items: [], itemsTotal: 0 }, null);
@@ -515,7 +575,19 @@ export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
     }
   }
 
-  // 2. Nothing reconciles. Aim at the largest total seen — missing items only
+  // 2. No pass adds up as a whole. A common reason is a mangled quantity line
+  //    read as a product priced at the unit price; drop those and re-check.
+  for (const run of cleaned) {
+    for (const total of totals) {
+      const kept = dropUnitPriceEchoes(run.items, total);
+      if (kept) {
+        const itemsTotal = roundCents(kept.reduce((sum, item) => sum + item.price, 0));
+        return withTotal({ items: kept, itemsTotal }, total);
+      }
+    }
+  }
+
+  // 3. Nothing reconciles. Aim at the largest total seen — missing items only
   //    ever pull a sum below the truth — and keep the pass closest to it.
   if (target !== null) {
     const best = cleaned.reduce((a, b) =>
@@ -524,7 +596,7 @@ export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
     return withTotal(best, target);
   }
 
-  // 3. No total anywhere: the pass that found the most items is the best guess,
+  // 4. No total anywhere: the pass that found the most items is the best guess,
   //    and the UI will say the scan couldn't be verified.
   return cleaned.reduce((a, b) => (b.items.length > a.items.length ? b : a));
 }

@@ -292,6 +292,27 @@ const RECONCILE_CASES: {
     expectMatch: true,
   },
   {
+    // Bar Rosati shape: "2 x 5,50" and "2 x 10,00" were read as products at
+    // their unit price, alongside the real 11.00 and 20.00 lines. Dropping the
+    // echoes makes the receipt add up.
+    label: "drops quantity lines read as products at their unit price",
+    runs: [fakeRun([11, 5.5, 10, 20, 5.89], null), fakeRun([], 36.88)],
+    expectSum: 36.89,
+    expectTotal: 36.88,
+    expectMatch: true,
+  },
+  {
+    // The guard against the above: no item is a unit-price echo here, so the
+    // gap must be reported, not closed by discarding real lines. An
+    // unrestricted subset search would "fix" this to 10+70+5 and call it
+    // verified.
+    label: "keeps real items when no unit-price echo explains the gap",
+    runs: [fakeRun([10, 70, 4, 3], null), fakeRun([], 85)],
+    expectSum: 87,
+    expectTotal: 85,
+    expectMatch: false,
+  },
+  {
     // Nothing reconciles: aim at the largest total, keep the closest pass.
     label: "falls back to the pass closest to the largest total",
     runs: [fakeRun([10], 50), fakeRun([10, 20, 15], null)],
