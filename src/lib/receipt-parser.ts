@@ -33,6 +33,9 @@ export type ParsedReceipt = {
 const NON_ITEM_KEYWORDS = [
   "TOTALE", "TOT", "SUBTOTALE", "IMPORTO", "IMPONIBILE", "CORRISPETTIVO",
   "IVA", "ESENTE", "ESENZIONE", "ALIQUOTA",
+  // Sales tax in the languages that turn up on receipts from tourist areas and
+  // border regions. Without these a VAT recap line becomes a purchase.
+  "MWST", "MEHRWERTSTEUER", "VAT", "TVA", "BTW", "STEUER",
   "CONTANTE", "CONTANTI", "RESTO", "BANCOMAT", "POS", "ELETTRONICO",
   // Not a bare "CARTA": that is a real product word ("Menu Carta", "carta
   // forno", "carta igienica") and blacklisting it drops genuine items.
