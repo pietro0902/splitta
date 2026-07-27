@@ -71,6 +71,20 @@ const TOTAL_KEYWORDS = [
   "TOTAL",
 ];
 
+/**
+ * Payment lines, used as a fallback source for the total. What was handed over
+ * equals the bill whenever no change was given, and on a creased receipt the
+ * "TOTALE" line is often the one that fails to survive OCR while the payment
+ * line right below it comes through intact.
+ */
+const PAYMENT_KEYWORDS = [
+  "CONTANTE", "CONTANTI", "CARTA DI CREDITO", "CARTA CREDITO",
+  "PAGAMENTO CONTANTE", "PAGAMENTO ELETTRONICO", "IMPORTO PAGATO", "BANCOMAT",
+];
+
+/** Change-given line: if it is non-zero, the payment was more than the bill. */
+const CHANGE_KEYWORDS = ["RESTO"];
+
 /** Cent of slack for comparing a sum against a printed total. */
 const TOTAL_TOLERANCE = 0.015;
 
@@ -206,6 +220,27 @@ function findTotal(lines: string[]): { value: number | null; index: number } {
     if (!containsKeyword(normalized, TOTAL_KEYWORDS)) continue;
     if (NOT_THE_TOTAL.test(normalized)) continue;
 
+    const match = matchTrailingPrice(lines[i]);
+    if (match) {
+      const value = toAmount(match[1]);
+      if (value !== null && value > 0) return { value, index: i };
+    }
+  }
+
+  // Nothing labelled as a total survived. Fall back to what was paid, but only
+  // when no change was given — otherwise the payment exceeds the bill.
+  const changeGiven = lines.some((line) => {
+    const normalized = normalize(line);
+    if (!containsKeyword(normalized, CHANGE_KEYWORDS)) return false;
+    const match = matchTrailingPrice(line);
+    const value = match ? toAmount(match[1]) : null;
+    return value !== null && value > 0.01;
+  });
+  if (changeGiven) return { value: null, index: -1 };
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const normalized = normalize(lines[i]);
+    if (!containsKeyword(normalized, PAYMENT_KEYWORDS)) continue;
     const match = matchTrailingPrice(lines[i]);
     if (match) {
       const value = toAmount(match[1]);
@@ -426,6 +461,34 @@ function withTotal(
  * something OCR noise produces. That total is then attached to the winner even
  * when the winning pass never read it itself.
  */
+/**
+ * Drops a line item that is really the receipt total.
+ *
+ * When the "TOTALE" label doesn't survive OCR — routine on a creased receipt —
+ * the amount beside it still does, and lands as a nameless item worth the whole
+ * bill. Observed on two different receipts: items summing to exactly the total,
+ * plus the total itself, doubling the sum and making a correct pass look like
+ * the worst one.
+ *
+ * Only fires when there are other items and when removing it moves the sum
+ * closer to the total, so a genuine single-item receipt is never gutted.
+ */
+function withoutTotalAsItem(run: ParsedReceipt, total: number): ParsedReceipt {
+  if (run.items.length < 2) return run;
+
+  // Relative tolerance: OCR routinely misreads the cents of a large amount
+  // (85.00 read as 85.09), and an exact match would miss those.
+  const tolerance = Math.max(0.02, total * 0.01);
+  const index = run.items.findIndex((item) => Math.abs(item.price - total) <= tolerance);
+  if (index < 0) return run;
+
+  const items = run.items.filter((_, i) => i !== index);
+  const itemsTotal = roundCents(items.reduce((sum, item) => sum + item.price, 0));
+  if (Math.abs(itemsTotal - total) >= Math.abs(run.itemsTotal - total)) return run;
+
+  return { ...run, items, itemsTotal };
+}
+
 export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
   const usable = runs.filter((run) => run.items.length > 0);
   if (usable.length === 0) return runs[0] ?? withTotal({ items: [], itemsTotal: 0 }, null);
@@ -437,8 +500,14 @@ export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
     .map((run) => run.declaredTotal)
     .filter((total): total is number => total !== null);
 
+  // Strip the total-as-an-item before judging anything: otherwise a pass that
+  // read every line correctly scores as the furthest from the truth.
+  const target = totals.length > 0 ? Math.max(...totals) : null;
+  const cleaned =
+    target !== null ? usable.map((run) => withoutTotalAsItem(run, target)) : usable;
+
   // 1. Provably consistent: items reconcile against a total someone read.
-  for (const run of usable) {
+  for (const run of cleaned) {
     for (const total of totals) {
       if (Math.abs(run.itemsTotal - total) <= TOTAL_TOLERANCE) {
         return withTotal(run, total);
@@ -448,9 +517,8 @@ export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
 
   // 2. Nothing reconciles. Aim at the largest total seen — missing items only
   //    ever pull a sum below the truth — and keep the pass closest to it.
-  if (totals.length > 0) {
-    const target = Math.max(...totals);
-    const best = usable.reduce((a, b) =>
+  if (target !== null) {
+    const best = cleaned.reduce((a, b) =>
       Math.abs(b.itemsTotal - target) < Math.abs(a.itemsTotal - target) ? b : a
     );
     return withTotal(best, target);
@@ -458,5 +526,5 @@ export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
 
   // 3. No total anywhere: the pass that found the most items is the best guess,
   //    and the UI will say the scan couldn't be verified.
-  return usable.reduce((a, b) => (b.items.length > a.items.length ? b : a));
+  return cleaned.reduce((a, b) => (b.items.length > a.items.length ? b : a));
 }

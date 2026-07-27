@@ -115,7 +115,7 @@ Menu Carta                                 4,00
 Gnocchi rosa                      10,00
 Ravioli Castalmagno                   12,00
 Stinco                                12,00
-CONTANTI                               89,00
+CONTANTI                               38,00
 `,
     expected: [
       ["Menu Carta", 4],
@@ -123,8 +123,9 @@ CONTANTI                               89,00
       ["Ravioli Castalmagno", 12],
       ["Stinco", 12],
     ],
-    expectTotal: null,
-    expectMatch: null,
+    // No "TOTALE" line survived, so the amount paid stands in for it.
+    expectTotal: 38,
+    expectMatch: true,
   },
   {
     // Same receipt, but a pass where OCR lost the "x" of "2X 2,00". The line
@@ -148,8 +149,8 @@ CONTANTI                               26,00
       ["Gnocchi rosa", 10],
       ["Vino rosso", 12],
     ],
-    expectTotal: null,
-    expectMatch: null,
+    expectTotal: 26,
+    expectMatch: true,
   },
   {
     // Real OCR output, Zuma. Restaurant docket format: quantity in front, unit
@@ -279,6 +280,15 @@ const RECONCILE_CASES: {
     runs: [fakeRun([24, 30, 39], 139), fakeRun([24, 30, 39, 46], 139)],
     expectSum: 139,
     expectTotal: 139,
+    expectMatch: true,
+  },
+  {
+    // Rosati / AVIF shape: the "TOTALE" label was lost, so its amount landed
+    // as an item. Dropping it makes the rest add up exactly.
+    label: "drops the total that was parsed as a line item",
+    runs: [fakeRun([10, 20, 30], null), fakeRun([], 30)],
+    expectSum: 30,
+    expectTotal: 30,
     expectMatch: true,
   },
   {
