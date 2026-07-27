@@ -46,7 +46,8 @@ const NON_ITEM_KEYWORDS = [
   "CASSA", "OPERATORE", "ADDETTO", "CASSIERE",
   // Column headers and docket metadata seen on real receipts.
   "DESCRIZIONE", "DESCR", "PREZZO", "QUANTITA", "QTA", "ARTICOLO",
-  "DOCUMENTO GESTIONALE", "NET TOTAL", "SUBTOTAL", "CHK", "TBL",
+  // Both spellings: OCR frequently glues these two words together.
+  "DOCUMENTO GESTIONALE", "NET TOTAL", "NETTOTAL", "SUBTOTAL", "CHK", "TBL",
   // A bare "EURO" is the price-column header, never a product.
   "EURO",
   "GRAZIE", "ARRIVEDERCI", "SCONTRINO PARLANTE",
@@ -204,7 +205,9 @@ function containsKeyword(normalized: string, keywords: string[]): boolean {
   return keywords.some((keyword) => {
     // Escape regex metacharacters (P.IVA, TOT., COD.FISCALE contain dots).
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(^|[^A-Z0-9])${escaped}($|[^A-Z0-9])`).test(normalized);
+    // Digits may follow directly ("IVA10%", "TOT.36,20") — OCR often drops the
+    // space. A letter may not, so "IVAN" is still not "IVA".
+    return new RegExp(`(^|[^A-Z0-9])${escaped}($|[^A-Z])`).test(normalized);
   });
 }
 
