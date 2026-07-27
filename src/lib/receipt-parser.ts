@@ -136,6 +136,16 @@ const QTY_AT_UNIT_LOOSE = new RegExp(
 const QUANTITY_LINE =
   /^\s*(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:KG|GR|G|LT|L|PZ)?\s*[x*]\s*(\d{1,5}[.,]\d{2})/i;
 
+/**
+ * Everything before the price is just a small count — "2X", "2 x", "2", "2." —
+ * so the line is a quantity marker printed above its product, not an item of
+ * its own. QUANTITY_LINE catches these only when the "x" survives OCR; on a
+ * faded receipt it often doesn't, and the line then looks like a nameless
+ * EUR 2,00 purchase. Capped at three digits so a smudged EAN still becomes a
+ * real (unnamed) item rather than being silently dropped.
+ */
+const BARE_QUANTITY = /^\s*\d{1,3}\s*(?:[xX×*]|[^A-Za-z0-9]{1,2})?\s*$/;
+
 /** Standalone numeric codes (EAN, department numbers) that aren't names. */
 const CODE_ONLY = /^[\d\s.\-*#/]+$/;
 
@@ -331,6 +341,16 @@ export function parseReceipt(text: string): ParsedReceipt {
       // a real line would break the total checksum, which is the one signal the
       // user has that the scan is complete. They can rename it in review.
       const usable = name && !CODE_ONLY.test(name) && name.length >= 2;
+
+      // A bare count above a priced line is that line's quantity, not a
+      // separate purchase: "2X 2,00" sitting above "Menu Carta 4,00".
+      // Not conditioned on the name being unusable: OCR debris like "2 «" reads
+      // as a perfectly good name by the usual test, yet BARE_QUANTITY already
+      // guarantees there is no real product word here.
+      const nextHasPrice =
+        i + 1 < body.length && matchTrailingPrice(body[i + 1]) !== null;
+      if (BARE_QUANTITY.test(raw) && nextHasPrice) continue;
+
       items.push({
         name: usable ? name : UNNAMED_ITEM,
         price: priceValue,

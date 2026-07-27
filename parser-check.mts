@@ -127,6 +127,31 @@ CONTANTI                               89,00
     expectMatch: null,
   },
   {
+    // Same receipt, but a pass where OCR lost the "x" of "2X 2,00". The line
+    // then looks like a nameless EUR 2,00 item sitting above the product it
+    // actually belongs to.
+    label: "real OCR: quantity marker whose x didn't survive",
+    text: `
+Trattoria I] Gabbiano
+EURO
+2 2,00
+
+Menu Carta                                 4,00
+2 « 2,00
+Gnocchi rosa                      10,00
+2. 3,00
+Vino rosso                        12,00
+CONTANTI                               26,00
+`,
+    expected: [
+      ["Menu Carta", 4],
+      ["Gnocchi rosa", 10],
+      ["Vino rosso", 12],
+    ],
+    expectTotal: null,
+    expectMatch: null,
+  },
+  {
     // Real OCR output, Zuma. Restaurant docket format: quantity in front, unit
     // price after an @ that OCR renders as "€" or "G", line total at the right.
     label: "real OCR: quantity-first docket with @ unit prices",
