@@ -15,8 +15,8 @@ import { MemberAvatar } from "@/components/member-avatar";
 import { PayerEditor } from "@/components/payer-editor";
 import { computePayers } from "@/lib/payers";
 import { createExpensesFromReceipt } from "@/lib/actions";
-import { recognizeReceipt, type OcrProgress } from "@/lib/ocr";
-import { parseReceipt, type ParsedItem } from "@/lib/receipt-parser";
+import { scanReceipt, type OcrProgress } from "@/lib/ocr";
+import type { ParsedItem } from "@/lib/receipt-parser";
 import type { Member } from "@/lib/db-types";
 
 type ItemWithSplits = ParsedItem & {
@@ -94,8 +94,7 @@ export function ReceiptScanner({
     setProgress({ ratio: 0, label: "Starting" });
 
     try {
-      const text = await recognizeReceipt(file, setProgress);
-      const result = parseReceipt(text);
+      const result = await scanReceipt(file, setProgress);
 
       if (result.items.length === 0) {
         setError(

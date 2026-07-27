@@ -6,7 +6,7 @@
  * then tune the keyword lists / regexes in src/lib/receipt-parser.ts until it
  * passes. That keeps extraction quality a thing you can measure, not guess at.
  */
-import { parseReceipt, UNNAMED_ITEM } from "./src/lib/receipt-parser";
+import { parseReceipt, reconcile, UNNAMED_ITEM } from "./src/lib/receipt-parser";
 
 type Case = {
   label: string;
@@ -218,6 +218,71 @@ for (const testCase of CASES) {
     console.log(`  FAIL: expected match ${testCase.expectMatch}, got ${result.totalMatches}`);
     failures++;
   }
+}
+
+// --- reconcile(): picking the right pass out of several OCR attempts --------
+
+console.log("\n=== reconcile: cross-checking multiple OCR passes");
+
+/** Build a ParsedReceipt the way parseReceipt would, from prices and a total. */
+function fakeRun(prices: number[], declaredTotal: number | null) {
+  const text =
+    prices.map((p, i) => `ITEM ${i}    ${p.toFixed(2)}`).join("\n") +
+    (declaredTotal !== null ? `\nTOTALE COMPLESSIVO   ${declaredTotal.toFixed(2)}` : "");
+  return parseReceipt(text);
+}
+
+const RECONCILE_CASES: {
+  label: string;
+  runs: ReturnType<typeof fakeRun>[];
+  expectSum: number;
+  expectTotal: number | null;
+  expectMatch: boolean | null;
+}[] = [
+  {
+    // The Gabbiano shape: every pass reads the items, only one reads the total.
+    label: "total from one pass, items from another",
+    runs: [fakeRun([4, 10, 12], null), fakeRun([4, 10, 12], 26)],
+    expectSum: 26,
+    expectTotal: 26,
+    expectMatch: true,
+  },
+  {
+    // The Zuma shape: the pass that reconciles wins over the one that doesn't,
+    // even though both read a total.
+    label: "prefers the pass whose items add up",
+    runs: [fakeRun([24, 30, 39], 139), fakeRun([24, 30, 39, 46], 139)],
+    expectSum: 139,
+    expectTotal: 139,
+    expectMatch: true,
+  },
+  {
+    // Nothing reconciles: aim at the largest total, keep the closest pass.
+    label: "falls back to the pass closest to the largest total",
+    runs: [fakeRun([10], 50), fakeRun([10, 20, 15], null)],
+    expectSum: 45,
+    expectTotal: 50,
+    expectMatch: false,
+  },
+  {
+    label: "no total anywhere: keeps the pass with the most items",
+    runs: [fakeRun([10], null), fakeRun([10, 20], null)],
+    expectSum: 30,
+    expectTotal: null,
+    expectMatch: null,
+  },
+];
+
+for (const testCase of RECONCILE_CASES) {
+  const result = reconcile(testCase.runs);
+  const ok =
+    Math.abs(result.itemsTotal - testCase.expectSum) < 0.001 &&
+    result.declaredTotal === testCase.expectTotal &&
+    result.totalMatches === testCase.expectMatch;
+  console.log(
+    `  ${ok ? "ok  " : "FAIL"} ${testCase.label}: sum=${result.itemsTotal} total=${result.declaredTotal} match=${result.totalMatches}`
+  );
+  if (!ok) failures++;
 }
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

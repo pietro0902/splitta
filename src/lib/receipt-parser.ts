@@ -68,6 +68,9 @@ const TOTAL_KEYWORDS = [
   "TOTAL",
 ];
 
+/** Cent of slack for comparing a sum against a printed total. */
+const TOTAL_TOLERANCE = 0.015;
+
 /**
  * Words that disqualify a line from being *the* total even though it contains a
  * total keyword: a VAT recap restates a tax slice, and "Net Total" is the
@@ -368,14 +371,69 @@ export function parseReceipt(text: string): ParsedReceipt {
     if (candidate >= itemsTotal) total = candidate;
   }
 
-  const discrepancy = total !== null ? roundCents(itemsTotal - total) : null;
+  return withTotal({ items, itemsTotal }, total);
+}
 
+/** Assembles the checksum fields for a set of items against a candidate total. */
+function withTotal(
+  base: { items: ParsedItem[]; itemsTotal: number },
+  total: number | null
+): ParsedReceipt {
+  const discrepancy = total !== null ? roundCents(base.itemsTotal - total) : null;
   return {
-    items,
+    items: base.items,
     declaredTotal: total,
-    itemsTotal,
-    // One cent of slack absorbs the receipt's own rounding.
-    totalMatches: discrepancy === null ? null : Math.abs(discrepancy) <= 0.01,
+    itemsTotal: base.itemsTotal,
+    totalMatches: discrepancy === null ? null : Math.abs(discrepancy) <= TOTAL_TOLERANCE,
     discrepancy,
   };
+}
+
+/**
+ * Picks the best result across several OCR passes of the same receipt.
+ *
+ * Different preprocessing settings fail in different places — one pass reads
+ * every line but loses the total, another reads the total but drops items.
+ * Measured on four real receipts, no single pass was best on all of them, but
+ * combining them recovered every price on every one.
+ *
+ * The receipt's own printed total is the referee: if some pass's items sum
+ * exactly to a total that *any* pass managed to read, those items are almost
+ * certainly complete — a wrong set of line items summing to the penny is not
+ * something OCR noise produces. That total is then attached to the winner even
+ * when the winning pass never read it itself.
+ */
+export function reconcile(runs: ParsedReceipt[]): ParsedReceipt {
+  const usable = runs.filter((run) => run.items.length > 0);
+  if (usable.length === 0) return runs[0] ?? withTotal({ items: [], itemsTotal: 0 }, null);
+
+  // Totals come from *every* run, including ones that found no items at all: a
+  // pass can read the total cleanly and still lose the item column, and that
+  // total is exactly what lets another pass be verified.
+  const totals = runs
+    .map((run) => run.declaredTotal)
+    .filter((total): total is number => total !== null);
+
+  // 1. Provably consistent: items reconcile against a total someone read.
+  for (const run of usable) {
+    for (const total of totals) {
+      if (Math.abs(run.itemsTotal - total) <= TOTAL_TOLERANCE) {
+        return withTotal(run, total);
+      }
+    }
+  }
+
+  // 2. Nothing reconciles. Aim at the largest total seen — missing items only
+  //    ever pull a sum below the truth — and keep the pass closest to it.
+  if (totals.length > 0) {
+    const target = Math.max(...totals);
+    const best = usable.reduce((a, b) =>
+      Math.abs(b.itemsTotal - target) < Math.abs(a.itemsTotal - target) ? b : a
+    );
+    return withTotal(best, target);
+  }
+
+  // 3. No total anywhere: the pass that found the most items is the best guess,
+  //    and the UI will say the scan couldn't be verified.
+  return usable.reduce((a, b) => (b.items.length > a.items.length ? b : a));
 }
