@@ -169,9 +169,23 @@ let paddlePromise: Promise<{
 type PaddleSegment = { text: string; box: { x: number; width: number } };
 type PaddleResult = { text?: string; lines?: PaddleSegment[][] };
 
+/**
+ * Where onnxruntime fetches its WASM binaries from.
+ *
+ * They are deliberately not bundled: the threaded/WebGPU binary is ~25.6 MB and
+ * Cloudflare Workers rejects any single asset above 25 MiB, so `next.config.ts`
+ * resolves the URL without emitting the file and the runtime pulls it from the
+ * CDN instead. Keep the version in step with the `onnxruntime-web` dependency —
+ * a mismatch between the JS glue and the WASM binary fails at load time.
+ */
+const ORT_WASM_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/";
+
 async function getPaddle() {
   if (!paddlePromise) {
     paddlePromise = (async () => {
+      const ort = await import("onnxruntime-web");
+      ort.env.wasm.wasmPaths = ORT_WASM_CDN;
+
       const { PaddleOcrService } = await import("ppu-paddle-ocr/web");
       const service = new PaddleOcrService();
       await service.initialize();
