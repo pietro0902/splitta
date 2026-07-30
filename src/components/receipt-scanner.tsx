@@ -183,7 +183,8 @@ export function ReceiptScanner({
           splitMemberIds: Array.from(item.splitMemberIds),
         })),
         receiptName,
-        category || undefined
+        category || undefined,
+        declaredTotalCents ?? undefined
       );
       reset();
     });

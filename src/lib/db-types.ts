@@ -23,7 +23,9 @@ export type ExpenseRow = {
   amount_cents: number;
   created_at: string;
   receipt_id: string | null;
+  // Joined in from `receipts`, not stored on the row (migration 0015).
   receipt_name: string | null;
+  receipt_declared_total_cents: number | null;
   category: string | null;
   split_mode: string;
 };

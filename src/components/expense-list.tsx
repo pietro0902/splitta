@@ -350,7 +350,8 @@ function EditReceiptModal({
           splitMemberIds: Array.from(l.splitMemberIds),
           category: category || undefined,
         })),
-        originalIds
+        originalIds,
+        category || undefined
       );
       onClose();
     });

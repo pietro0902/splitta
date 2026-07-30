@@ -218,9 +218,16 @@ export const db = {
 
   async getExpenses(groupId: number) {
     const d1 = await getDb();
+    // receipt_name comes from the receipts table (0015) rather than from a copy
+    // on every line, but it still arrives on the expense so the list and the
+    // grouping code read it exactly as before.
     const { results: expenses } = await d1
       .prepare(
-        `SELECT e.* FROM expenses e
+        `SELECT e.*,
+                r.name AS receipt_name,
+                r.declared_total_cents AS receipt_declared_total_cents
+         FROM expenses e
+         LEFT JOIN receipts r ON r.id = e.receipt_id
          WHERE e.group_id = ?
          ORDER BY e.created_at DESC`
       )
@@ -281,7 +288,6 @@ export const db = {
     splits: SplitInput[],
     splitMode: SplitMode,
     receiptId?: string,
-    receiptName?: string,
     category?: string
   ) {
     const d1 = await getDb();
@@ -289,9 +295,9 @@ export const db = {
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount_cents, paid_by_member_id, receipt_id, receipt_name, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO expenses (group_id, description, amount_cents, paid_by_member_id, receipt_id, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amountCents, primaryPayerId, receiptId ?? null, receiptName ?? null, category ?? null, splitMode)
+      .bind(groupId, description, amountCents, primaryPayerId, receiptId ?? null, category ?? null, splitMode)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
@@ -313,10 +319,33 @@ export const db = {
     return expenseId;
   },
 
+  // Create or update the receipt a scan belongs to. Called before its lines are
+  // written, so `expenses.receipt_id` never points at nothing.
+  async upsertReceipt(
+    receiptId: string,
+    groupId: number,
+    name: string | null,
+    category: string | null,
+    declaredTotalCents: number | null
+  ) {
+    const d1 = await getDb();
+    await d1
+      .prepare(
+        `INSERT INTO receipts (id, group_id, name, category, declared_total_cents)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           category = excluded.category,
+           declared_total_cents = COALESCE(excluded.declared_total_cents, receipts.declared_total_cents)`
+      )
+      .bind(receiptId, groupId, name, category, declaredTotalCents)
+      .run();
+  },
+
   async renameReceipt(receiptId: string, name: string, groupId: number) {
     const d1 = await getDb();
     await d1
-      .prepare("UPDATE expenses SET receipt_name = ? WHERE receipt_id = ? AND group_id = ?")
+      .prepare("UPDATE receipts SET name = ? WHERE id = ? AND group_id = ?")
       .bind(name, receiptId, groupId)
       .run();
   },

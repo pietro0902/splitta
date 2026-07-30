@@ -143,7 +143,7 @@ export async function addExpense(formData: FormData) {
   }
   await assertMembersInGroup(groupId, referencedMemberIds(payers, splits));
 
-  await db.addExpense(groupId, description, amountCents, payers, splits, splitMode, undefined, undefined, category);
+  await db.addExpense(groupId, description, amountCents, payers, splits, splitMode, undefined, category);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -202,7 +202,10 @@ export async function createExpensesFromReceipt(
   // every line a scan ever created was stored uncategorised -- 167 of the 268
   // expenses in production, which is most of the money the analytics tab is
   // supposed to break down.
-  category?: string
+  category?: string,
+  // What the paper said the total was, as the parser read it. Kept so that
+  // "did this scan reconcile?" stays answerable after the review screen closes.
+  declaredTotalCents?: number
 ) {
   await assertAccess(groupId);
 
@@ -214,11 +217,14 @@ export async function createExpensesFromReceipt(
     ...valid.flatMap((i) => i.splitMemberIds),
   ]);
 
+  // The receipt first, so no line ever references a receipt that isn't there.
+  await db.upsertReceipt(receiptId, groupId, name ?? null, category ?? null, declaredTotalCents ?? null);
+
   const payersByLine = distributePayersOverLines(payers, valid.map((i) => i.priceCents));
   for (let k = 0; k < valid.length; k++) {
     const item = valid[k];
     const { splits } = computeSplits("equal", item.priceCents, item.splitMemberIds, {});
-    await db.addExpense(groupId, item.name, item.priceCents, payersByLine[k], splits, "equal", receiptId, name, category);
+    await db.addExpense(groupId, item.name, item.priceCents, payersByLine[k], splits, "equal", receiptId, category);
   }
   revalidatePath(`/groups/${groupId}`);
 }
@@ -240,7 +246,9 @@ export async function saveReceipt(
   receiptName: string,
   payers: PayerInput[],
   items: { id?: number; name: string; priceCents: number; splitMemberIds: number[]; category?: string }[],
-  originalIds: number[]
+  originalIds: number[],
+  // One category for the whole shop, applied to each of its lines.
+  category?: string
 ) {
   await assertAccess(groupId);
 
@@ -269,7 +277,7 @@ export async function saveReceipt(
       await db.updateExpense(item.id, groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", item.category);
       kept.add(item.id);
     } else {
-      await db.addExpense(groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", receiptId, receiptName.trim() || undefined);
+      await db.addExpense(groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", receiptId, item.category);
     }
   }
 
@@ -277,7 +285,9 @@ export async function saveReceipt(
     if (!kept.has(id)) await db.deleteExpense(id, groupId);
   }
 
-  await db.renameReceipt(receiptId, receiptName.trim(), groupId);
+  // Name and category belong to the receipt, not to its lines. The declared
+  // total is left alone: only a scan can establish it, and this is an edit.
+  await db.upsertReceipt(receiptId, groupId, receiptName.trim() || null, category ?? null, null);
   revalidatePath(`/groups/${groupId}`);
 }
 
