@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, X, Users, Sparkles } from "lucide-react";
+import { Plus, X, Users, Sparkles, UserCheck } from "lucide-react";
 import { createGroup } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 
@@ -16,6 +16,7 @@ export function CreateGroupDialog() {
   const [emoji, setEmoji] = useState("👥");
   const [memberInput, setMemberInput] = useState("");
   const [members, setMembers] = useState<string[]>([]);
+  const [meIndex, setMeIndex] = useState<number | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function addMember() {
@@ -27,7 +28,13 @@ export function CreateGroupDialog() {
   }
 
   function removeMember(name: string) {
+    const removed = members.indexOf(name);
     setMembers(members.filter((m) => m !== name));
+    // "Who is you" is an index into this list, so removing a name above it
+    // would otherwise silently reassign you to somebody else.
+    if (meIndex === null || removed === -1) return;
+    if (meIndex === removed) setMeIndex(null);
+    else if (meIndex > removed) setMeIndex(meIndex - 1);
   }
 
   function handleSubmit() {
@@ -36,6 +43,7 @@ export function CreateGroupDialog() {
     formData.set("name", name.trim());
     formData.set("emoji", emoji);
     formData.set("members", members.join(","));
+    if (meIndex !== null) formData.set("me", String(meIndex));
     startTransition(async () => {
       const result = await createGroup(formData);
       // The action records the creator's access server-side, so there is
@@ -51,6 +59,7 @@ export function CreateGroupDialog() {
     setEmoji("👥");
     setMemberInput("");
     setMembers([]);
+    setMeIndex(null);
     setOpen(false);
   }
 
@@ -174,6 +183,34 @@ export function CreateGroupDialog() {
                     <p className="text-xs text-muted-foreground mt-2">Add at least 2 members</p>
                   )}
                 </div>
+
+                {/* Which of those names is you. The server otherwise knows you
+                    may open this group but not who you are inside it, and every
+                    "you owe / you are owed" figure depends on that answer. */}
+                {members.length > 0 && (
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
+                      <UserCheck className="size-3.5" />
+                      And which one is you?
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {members.map((m, i) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setMeIndex(meIndex === i ? null : i)}
+                          className={`rounded-full px-3 py-1.5 text-sm font-medium transition-all ${
+                            meIndex === i
+                              ? "bg-primary/10 ring-2 ring-primary text-primary"
+                              : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <Button
                   onClick={handleSubmit}

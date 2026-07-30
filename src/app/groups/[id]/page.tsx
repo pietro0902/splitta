@@ -16,6 +16,7 @@ import { BalanceDisplay } from "@/components/balance-display";
 import { SettlementView } from "@/components/settlement-view";
 import { AnalyticsView } from "@/components/analytics-view";
 import { ShoppingList } from "@/components/shopping-list";
+import { IdentityPrompt } from "@/components/identity-prompt";
 import { GroupTabs } from "./tabs";
 
 export default async function GroupPage(props: PageProps<"/groups/[id]">) {
@@ -24,10 +25,14 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   // rendered on the sequential integer id alone and then claimed the group into
   // the visitor's list on mount, so walking /groups/1, /groups/2, ... read every
   // group in the deployment and added them all to the walker's own homepage.
-  await requireAccess(Number(id));
+  const clientId = await requireAccess(Number(id));
 
   const group = await db.getGroup(Number(id));
   if (!group) notFound();
+
+  // Null when this browser never said which member it is. Everything
+  // personalised depends on the answer, so the page asks for it.
+  const myMemberId = await db.getAccessMemberId(group.id, clientId);
 
   const [balances, settlements, settlementRecords, shoppingItems] = await Promise.all([
     db.getBalances(group.id),
@@ -67,6 +72,10 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-2xl flex-1 px-5 py-6">
+        {myMemberId === null && (
+          <IdentityPrompt groupId={group.id} members={group.members} />
+        )}
+
         <div className="mb-6 flex gap-3">
           <div className="flex-1">
             <AddExpenseForm groupId={group.id} members={group.members} />

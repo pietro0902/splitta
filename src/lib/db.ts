@@ -82,6 +82,24 @@ export const db = {
       .run();
   },
 
+  // Which member this client is in this group, or null if they never said.
+  async getAccessMemberId(groupId: number, clientId: string) {
+    const d1 = await getDb();
+    const row = await d1
+      .prepare("SELECT member_id FROM group_access WHERE group_id = ? AND client_id = ?")
+      .bind(groupId, clientId)
+      .first<{ member_id: number | null }>();
+    return row?.member_id ?? null;
+  },
+
+  async setAccessMember(groupId: number, clientId: string, memberId: number) {
+    const d1 = await getDb();
+    await d1
+      .prepare("UPDATE group_access SET member_id = ? WHERE group_id = ? AND client_id = ?")
+      .bind(memberId, groupId, clientId)
+      .run();
+  },
+
   async getMemberIds(groupId: number) {
     const d1 = await getDb();
     const { results } = await d1
@@ -120,7 +138,17 @@ export const db = {
     };
   },
 
-  async createGroup(name: string, emoji: string, memberNames: string[], clientId: string) {
+  // `meIndex` is which of `memberNames` the creator says they are, or undefined
+  // if they skipped the question. Without it the group is reachable but
+  // anonymous: the server knows this browser may look, not who it is looking
+  // as, and every "your balance" figure is uncomputable.
+  async createGroup(
+    name: string,
+    emoji: string,
+    memberNames: string[],
+    clientId: string,
+    meIndex?: number
+  ) {
     const d1 = await getDb();
     const inviteToken = crypto.randomUUID();
     const groupResult = await d1
@@ -137,13 +165,31 @@ export const db = {
       ),
       // In the same batch as the members: a group whose creator has no access
       // row is unreachable by anyone, including them.
-      // member_id is null because the creation form never asks which of the
-      // names being typed in is the person typing.
       d1
         .prepare("INSERT INTO group_access (group_id, client_id, member_id) VALUES (?, ?, NULL)")
         .bind(groupId, clientId),
     ];
     await d1.batch(stmts);
+
+    // Resolving the creator's identity happens after the batch, because a
+    // member's id only exists once its row does, and the ids follow insertion
+    // order. Deliberately not part of the batch: if this half fails the group
+    // is still reachable, and the "who are you?" prompt on the group page
+    // picks up the missing answer.
+    if (meIndex !== undefined && meIndex >= 0 && meIndex < memberNames.length) {
+      const { results } = await d1
+        .prepare("SELECT id FROM members WHERE group_id = ? ORDER BY id")
+        .bind(groupId)
+        .all<{ id: number }>();
+      const memberId = results[meIndex]?.id;
+      if (memberId) {
+        await d1
+          .prepare("UPDATE group_access SET member_id = ? WHERE group_id = ? AND client_id = ?")
+          .bind(memberId, groupId, clientId)
+          .run();
+      }
+    }
+
     return groupId;
   },
 

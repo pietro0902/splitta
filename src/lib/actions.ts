@@ -32,10 +32,26 @@ export async function createGroup(formData: FormData) {
 
   // The one place a brand-new visitor gets an identity, alongside redeeming an
   // invite. Both are actions, which is the only place a cookie can be set.
+  // Which of the names just typed in is the person typing. Optional: skipping
+  // it costs the personalised figures, not access to the group.
+  const rawMe = formData.get("me");
+  const parsedMe = rawMe === null || rawMe === "" ? NaN : Number(rawMe);
+  const meIndex = Number.isInteger(parsedMe) ? parsedMe : undefined;
+
   const clientId = await getOrCreateClientId();
-  const groupId = await db.createGroup(name, emoji, memberNames, clientId);
+  const groupId = await db.createGroup(name, emoji, memberNames, clientId, meIndex);
   revalidatePath("/");
   return { groupId };
+}
+
+// Answer "who are you in this group?" after the fact. Covers groups created
+// before the question existed, and anyone whose creation-time answer was lost.
+export async function claimMemberIdentity(groupId: number, memberId: number) {
+  const clientId = await assertAccess(groupId);
+  await assertMembersInGroup(groupId, [memberId]);
+  await db.setAccessMember(groupId, clientId, memberId);
+  revalidatePath(`/groups/${groupId}`);
+  revalidatePath("/");
 }
 
 export async function deleteGroup(groupId: number) {
