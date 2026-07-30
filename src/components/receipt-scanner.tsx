@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
 import { PayerEditor } from "@/components/payer-editor";
 import { computePayers } from "@/lib/payers";
+import { formatMoney, toCents } from "@/lib/money";
 import { createExpensesFromReceipt } from "@/lib/actions";
 import { scanReceipt, type OcrProgress } from "@/lib/ocr";
 import type { ParsedItem } from "@/lib/receipt-parser";
@@ -24,7 +25,7 @@ type ItemWithSplits = ParsedItem & {
 };
 
 /** One cent of slack absorbs the receipt's own rounding. */
-const TOTAL_TOLERANCE = 0.01;
+const TOTAL_TOLERANCE_CENTS = 1;
 
 export function ReceiptScanner({
   groupId,
@@ -154,15 +155,19 @@ export function ReceiptScanner({
     setPaidBy(next);
   }
 
-  const total = items?.reduce((s, i) => s + i.price, 0) ?? 0;
-  const payerResult = computePayers(total, Array.from(paidBy), paidAmounts);
+  // The review list stays in euros because that is what the parser produces and
+  // what the per-line input edits; cents start here, at the totals, and are what
+  // leaves for the server. Converting each line before summing is also stricter
+  // than converting the sum, which is where a float total would drift.
+  const totalCents = items?.reduce((s, i) => s + toCents(i.price), 0) ?? 0;
+  const declaredTotalCents = declaredTotal !== null ? toCents(declaredTotal) : null;
+  const payerResult = computePayers(totalCents, Array.from(paidBy), paidAmounts);
 
   // Derived, not stored: the user edits prices in review, so a discrepancy
   // captured at scan time would keep contradicting the live total and could
   // never clear once they fixed the misread line.
-  const discrepancy =
-    declaredTotal !== null ? Math.round((total - declaredTotal) * 100) / 100 : null;
-  const totalMatches = discrepancy !== null && Math.abs(discrepancy) <= TOTAL_TOLERANCE;
+  const discrepancy = declaredTotalCents !== null ? totalCents - declaredTotalCents : null;
+  const totalMatches = discrepancy !== null && Math.abs(discrepancy) <= TOTAL_TOLERANCE_CENTS;
 
   function handleSubmit() {
     if (!items || !payerResult.valid) return;
@@ -172,7 +177,7 @@ export function ReceiptScanner({
         payerResult.payers,
         items.map((item) => ({
           name: item.name,
-          price: item.price,
+          priceCents: toCents(item.price),
           splitMemberIds: Array.from(item.splitMemberIds),
         })),
         receiptName
@@ -443,7 +448,7 @@ export function ReceiptScanner({
                     </div>
                   )}
 
-                  {declaredTotal !== null && discrepancy !== null && (
+                  {declaredTotalCents !== null && discrepancy !== null && (
                     <div
                       className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${
                         totalMatches
@@ -459,15 +464,15 @@ export function ReceiptScanner({
                       <p className="leading-relaxed">
                         {totalMatches ? (
                           <>
-                            Items add up to the receipt total (&euro;
-                            {declaredTotal.toFixed(2)}).
+                            Items add up to the receipt total (
+                            {formatMoney(declaredTotalCents)}).
                           </>
                         ) : (
                           <>
-                            The receipt says &euro;{declaredTotal.toFixed(2)}, but these items
-                            add up to &euro;{total.toFixed(2)} —{" "}
-                            {discrepancy > 0 ? "over" : "short"} by &euro;
-                            {Math.abs(discrepancy).toFixed(2)}. Check for a missing or misread
+                            The receipt says {formatMoney(declaredTotalCents)}, but these items
+                            add up to {formatMoney(totalCents)} —{" "}
+                            {discrepancy > 0 ? "over" : "short"} by{" "}
+                            {formatMoney(Math.abs(discrepancy))}. Check for a missing or misread
                             line.
                           </>
                         )}
@@ -479,7 +484,7 @@ export function ReceiptScanner({
                   <div className="flex items-center justify-between pt-2 border-t border-border">
                     <span className="text-sm font-medium text-muted-foreground">Total</span>
                     <span className="text-lg font-heading font-bold tabular-nums">
-                      &euro;{total.toFixed(2)}
+                      {formatMoney(totalCents)}
                     </span>
                   </div>
 

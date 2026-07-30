@@ -2,20 +2,21 @@
 
 import { motion } from "framer-motion";
 import { MemberAvatar } from "@/components/member-avatar";
+import { formatMoney } from "@/lib/money";
 import type { Member } from "@/lib/db-types";
 
-type BalanceData = { member: Member; balance: number };
+type BalanceData = { member: Member; balance_cents: number };
 
 export function BalanceDisplay({ balances }: { balances: BalanceData[] }) {
   if (balances.length === 0) return null;
-  const maxAbs = Math.max(...balances.map((b) => Math.abs(b.balance)), 1);
+  const maxAbs = Math.max(...balances.map((b) => Math.abs(b.balance_cents)), 1);
 
   return (
     <div className="space-y-3">
       {balances.map((b, i) => {
-        const pct = Math.abs(b.balance) / maxAbs;
-        const isPositive = b.balance > 0.01;
-        const isNegative = b.balance < -0.01;
+        const pct = Math.abs(b.balance_cents) / maxAbs;
+        const isPositive = b.balance_cents > 0;
+        const isNegative = b.balance_cents < 0;
         return (
           <motion.div
             key={b.member.id}
@@ -33,7 +34,7 @@ export function BalanceDisplay({ balances }: { balances: BalanceData[] }) {
                     isPositive ? "text-emerald-600 dark:text-emerald-400" : isNegative ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"
                   }`}
                 >
-                  {isPositive ? "+" : ""}&euro;{b.balance.toFixed(2)}
+                  {isPositive ? "+" : ""}{formatMoney(b.balance_cents)}
                 </span>
               </div>
               <div className="h-2 rounded-full bg-muted overflow-hidden">

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getClientId } from "@/lib/session";
 import { GroupList } from "@/components/group-list";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Receipt } from "lucide-react";
@@ -6,7 +7,10 @@ import { Receipt } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const groups = await db.getGroups();
+  // No cookie means no groups: a first-time visitor renders the empty state,
+  // and the id is minted when they create a group or redeem an invite.
+  const clientId = await getClientId();
+  const groups = clientId ? await db.getGroups(clientId) : [];
 
   return (
     <div className="relative flex flex-col flex-1">

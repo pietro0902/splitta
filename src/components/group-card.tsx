@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Trash2 } from "lucide-react";
 import { MemberAvatarStack } from "@/components/member-avatar";
 import { deleteGroup } from "@/lib/actions";
-import { removeGroupId } from "@/lib/local-groups";
+import { formatMoney } from "@/lib/money";
 import { useTransition } from "react";
 import type { GroupSummary } from "@/lib/db-types";
 
@@ -41,11 +41,10 @@ export function GroupCard({ group, index }: { group: GroupSummary; index: number
                     `Delete "${group.name}"?\n\nThis erases the group and all its expenses for everyone in it, not just on this device. It can't be undone.`
                   )
                 ) {
-                  // Drop it from the DB first: clearing the local list before a
-                  // failed delete would leave a group nobody can reach.
-                  startTransition(async () => {
-                    await deleteGroup(group.id);
-                    removeGroupId(group.id);
+                  // The access rows cascade with the group, so deleting it
+                  // removes it from every member's homepage, not just this one.
+                  startTransition(() => {
+                    void deleteGroup(group.id);
                   });
                 }
               }}
@@ -65,7 +64,7 @@ export function GroupCard({ group, index }: { group: GroupSummary; index: number
             <div>
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Total spent</p>
               <p className="font-heading text-2xl font-bold tabular-nums">
-                &euro;{group.totalExpenses.toFixed(2)}
+                {formatMoney(group.totalExpensesCents)}
               </p>
             </div>
             <div className="flex items-center gap-3">

@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
+import { requireAccess } from "@/lib/access";
+import { formatMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 import Link from "next/link";
@@ -13,11 +15,16 @@ import { BalanceDisplay } from "@/components/balance-display";
 import { SettlementView } from "@/components/settlement-view";
 import { AnalyticsView } from "@/components/analytics-view";
 import { ShoppingList } from "@/components/shopping-list";
-import { AutoClaimGroup } from "@/components/auto-claim-group";
 import { GroupTabs } from "./tabs";
 
 export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   const { id } = await props.params;
+  // Reading a group requires having redeemed its invite. Previously this page
+  // rendered on the sequential integer id alone and then claimed the group into
+  // the visitor's list on mount, so walking /groups/1, /groups/2, ... read every
+  // group in the deployment and added them all to the walker's own homepage.
+  await requireAccess(Number(id));
+
   const group = await db.getGroup(Number(id));
   if (!group) notFound();
 
@@ -32,7 +39,6 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
 
   return (
     <div className="relative flex flex-col flex-1">
-      <AutoClaimGroup groupId={group.id} />
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-xl">
         <div className="mx-auto max-w-2xl flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
@@ -48,7 +54,7 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
                 <span className="truncate">{group.name}</span>
               </h1>
               <p className="text-xs text-muted-foreground truncate">
-                {group.members.length} members &middot; &euro;{group.totalExpenses.toFixed(2)} total
+                {group.members.length} members &middot; {formatMoney(group.totalExpensesCents)} total
               </p>
             </div>
           </div>

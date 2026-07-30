@@ -18,20 +18,91 @@ const colors = [
 ];
 
 export const db = {
-  async getGroups() {
+  // Only the groups this client has been granted access to. Everything the
+  // homepage renders comes from here, so the filter has to be in the query --
+  // narrowing a full list client-side (as this used to) still ships every
+  // group's name, members and spend to every visitor in the HTML.
+  //
+  // Two round trips regardless of how many groups come back, instead of the
+  // 1 + 2N this did before: the totals are a correlated subquery, and the
+  // members of every matched group are fetched together.
+  async getGroups(clientId: string) {
     const d1 = await getDb();
     const { results: groups } = await d1
-      .prepare("SELECT * FROM groups ORDER BY created_at DESC")
-      .all<Group>();
+      .prepare(
+        `SELECT g.*,
+                COALESCE((SELECT SUM(e.amount_cents) FROM expenses e WHERE e.group_id = g.id), 0) AS totalExpensesCents
+         FROM groups g
+         JOIN group_access ga ON ga.group_id = g.id
+         WHERE ga.client_id = ?
+         ORDER BY g.created_at DESC`
+      )
+      .bind(clientId)
+      .all<Group & { totalExpensesCents: number }>();
 
-    const enriched = await Promise.all(
-      groups.map(async (g) => ({
-        ...g,
-        members: await this.getMembers(g.id),
-        totalExpenses: await this.getGroupTotal(g.id),
-      }))
-    );
-    return enriched;
+    if (groups.length === 0) return [];
+
+    const placeholders = groups.map(() => "?").join(",");
+    const { results: members } = await d1
+      .prepare(`SELECT * FROM members WHERE group_id IN (${placeholders})`)
+      .bind(...groups.map((g) => g.id))
+      .all<Member>();
+
+    const byGroup = new Map<number, Member[]>();
+    for (const m of members) {
+      const arr = byGroup.get(m.group_id) || [];
+      arr.push(m);
+      byGroup.set(m.group_id, arr);
+    }
+
+    return groups.map((g) => ({ ...g, members: byGroup.get(g.id) || [] }));
+  },
+
+  // --- access control -------------------------------------------------------
+
+  async hasAccess(groupId: number, clientId: string) {
+    const d1 = await getDb();
+    const row = await d1
+      .prepare("SELECT 1 AS ok FROM group_access WHERE group_id = ? AND client_id = ?")
+      .bind(groupId, clientId)
+      .first<{ ok: number }>();
+    return row !== null;
+  },
+
+  // Redeeming an invite a second time (say, after picking the wrong name)
+  // updates which member you claimed to be rather than failing.
+  async grantAccess(groupId: number, clientId: string, memberId: number | null) {
+    const d1 = await getDb();
+    await d1
+      .prepare(
+        `INSERT INTO group_access (group_id, client_id, member_id) VALUES (?, ?, ?)
+         ON CONFLICT(group_id, client_id) DO UPDATE SET member_id = excluded.member_id`
+      )
+      .bind(groupId, clientId, memberId)
+      .run();
+  },
+
+  async getMemberIds(groupId: number) {
+    const d1 = await getDb();
+    const { results } = await d1
+      .prepare("SELECT id FROM members WHERE group_id = ?")
+      .bind(groupId)
+      .all<{ id: number }>();
+    return results.map((r) => r.id);
+  },
+
+  // Guard for the actions that address expenses by their own id: being a member
+  // of group A must not let you edit an expense that lives in group B. Takes
+  // the whole set at once so editing a 20-line receipt stays one query.
+  async filterExpenseIdsInGroup(groupId: number, ids: number[]) {
+    if (ids.length === 0) return [];
+    const d1 = await getDb();
+    const placeholders = ids.map(() => "?").join(",");
+    const { results } = await d1
+      .prepare(`SELECT id FROM expenses WHERE group_id = ? AND id IN (${placeholders})`)
+      .bind(groupId, ...ids)
+      .all<{ id: number }>();
+    return results.map((r) => r.id);
   },
 
   async getGroup(id: number) {
@@ -45,11 +116,11 @@ export const db = {
       ...group,
       members: await this.getMembers(group.id),
       expenses: await this.getExpenses(group.id),
-      totalExpenses: await this.getGroupTotal(group.id),
+      totalExpensesCents: await this.getGroupTotal(group.id),
     };
   },
 
-  async createGroup(name: string, emoji: string, memberNames: string[]) {
+  async createGroup(name: string, emoji: string, memberNames: string[], clientId: string) {
     const d1 = await getDb();
     const inviteToken = crypto.randomUUID();
     const groupResult = await d1
@@ -58,11 +129,20 @@ export const db = {
       .run();
     const groupId = groupResult.meta.last_row_id;
 
-    const stmts = memberNames.map((memberName, i) =>
+    const stmts = [
+      ...memberNames.map((memberName, i) =>
+        d1
+          .prepare("INSERT INTO members (group_id, name, color) VALUES (?, ?, ?)")
+          .bind(groupId, memberName, colors[i % colors.length])
+      ),
+      // In the same batch as the members: a group whose creator has no access
+      // row is unreachable by anyone, including them.
+      // member_id is null because the creation form never asks which of the
+      // names being typed in is the person typing.
       d1
-        .prepare("INSERT INTO members (group_id, name, color) VALUES (?, ?, ?)")
-        .bind(groupId, memberName, colors[i % colors.length])
-    );
+        .prepare("INSERT INTO group_access (group_id, client_id, member_id) VALUES (?, ?, NULL)")
+        .bind(groupId, clientId),
+    ];
     await d1.batch(stmts);
     return groupId;
   },
@@ -150,7 +230,7 @@ export const db = {
   async addExpense(
     groupId: number,
     description: string,
-    amount: number,
+    amountCents: number,
     payers: PayerInput[],
     splits: SplitInput[],
     splitMode: SplitMode,
@@ -163,22 +243,22 @@ export const db = {
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount, paid_by_member_id, receipt_id, receipt_name, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO expenses (group_id, description, amount_cents, paid_by_member_id, receipt_id, receipt_name, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .bind(groupId, description, amount, primaryPayerId, receiptId ?? null, receiptName ?? null, category ?? null, splitMode)
+      .bind(groupId, description, amountCents, primaryPayerId, receiptId ?? null, receiptName ?? null, category ?? null, splitMode)
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
     const stmts = [
       ...payers.map((p) =>
         d1
-          .prepare("INSERT INTO expense_payers (expense_id, member_id, amount) VALUES (?, ?, ?)")
+          .prepare("INSERT INTO expense_payers (expense_id, member_id, amount_cents) VALUES (?, ?, ?)")
           .bind(expenseId, p.memberId, p.amount)
       ),
       ...splits.map((s) =>
         d1
           .prepare(
-            "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
+            "INSERT INTO expense_splits (expense_id, member_id, amount_cents, weight) VALUES (?, ?, ?, ?)"
           )
           .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
       ),
@@ -187,18 +267,19 @@ export const db = {
     return expenseId;
   },
 
-  async renameReceipt(receiptId: string, name: string) {
+  async renameReceipt(receiptId: string, name: string, groupId: number) {
     const d1 = await getDb();
     await d1
-      .prepare("UPDATE expenses SET receipt_name = ? WHERE receipt_id = ?")
-      .bind(name, receiptId)
+      .prepare("UPDATE expenses SET receipt_name = ? WHERE receipt_id = ? AND group_id = ?")
+      .bind(name, receiptId, groupId)
       .run();
   },
 
   async updateExpense(
     expenseId: number,
+    groupId: number,
     description: string,
-    amount: number,
+    amountCents: number,
     payers: PayerInput[],
     splits: SplitInput[],
     splitMode: SplitMode,
@@ -209,9 +290,9 @@ export const db = {
 
     await d1
       .prepare(
-        "UPDATE expenses SET description = ?, amount = ?, paid_by_member_id = ?, category = ?, split_mode = ? WHERE id = ?"
+        "UPDATE expenses SET description = ?, amount_cents = ?, paid_by_member_id = ?, category = ?, split_mode = ? WHERE id = ? AND group_id = ?"
       )
-      .bind(description, amount, primaryPayerId, category ?? null, splitMode, expenseId)
+      .bind(description, amountCents, primaryPayerId, category ?? null, splitMode, expenseId, groupId)
       .run();
 
     // Delete old payers/splits and insert the new ones
@@ -221,13 +302,13 @@ export const db = {
     const stmts = [
       ...payers.map((p) =>
         d1
-          .prepare("INSERT INTO expense_payers (expense_id, member_id, amount) VALUES (?, ?, ?)")
+          .prepare("INSERT INTO expense_payers (expense_id, member_id, amount_cents) VALUES (?, ?, ?)")
           .bind(expenseId, p.memberId, p.amount)
       ),
       ...splits.map((s) =>
         d1
           .prepare(
-            "INSERT INTO expense_splits (expense_id, member_id, amount, weight) VALUES (?, ?, ?, ?)"
+            "INSERT INTO expense_splits (expense_id, member_id, amount_cents, weight) VALUES (?, ?, ?, ?)"
           )
           .bind(expenseId, s.memberId, s.amount, s.weight ?? null)
       ),
@@ -235,16 +316,16 @@ export const db = {
     await d1.batch(stmts);
   },
 
-  async deleteExpense(id: number) {
+  async deleteExpense(id: number, groupId: number) {
     const d1 = await getDb();
-    await d1.prepare("DELETE FROM expenses WHERE id = ?").bind(id).run();
+    await d1.prepare("DELETE FROM expenses WHERE id = ? AND group_id = ?").bind(id, groupId).run();
   },
 
   async getGroupTotal(groupId: number) {
     const d1 = await getDb();
     const result = await d1
       .prepare(
-        "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE group_id = ?"
+        "SELECT COALESCE(SUM(amount_cents), 0) as total FROM expenses WHERE group_id = ?"
       )
       .bind(groupId)
       .first<{ total: number }>();
@@ -256,9 +337,11 @@ export const db = {
     const debtors: { member: Member; amount: number }[] = [];
     const creditors: { member: Member; amount: number }[] = [];
 
-    balanceData.forEach(({ member, balance }) => {
-      if (balance < -0.01) debtors.push({ member, amount: -balance });
-      else if (balance > 0.01) creditors.push({ member, amount: balance });
+    // In cents, "owes something" is just a non-zero integer -- the one-cent
+    // tolerances that used to be here existed only to absorb float noise.
+    balanceData.forEach(({ member, balance_cents }) => {
+      if (balance_cents < 0) debtors.push({ member, amount: -balance_cents });
+      else if (balance_cents > 0) creditors.push({ member, amount: balance_cents });
     });
 
     debtors.sort((a, b) => b.amount - a.amount);
@@ -269,17 +352,17 @@ export const db = {
     let j = 0;
     while (i < debtors.length && j < creditors.length) {
       const amount = Math.min(debtors[i].amount, creditors[j].amount);
-      if (amount > 0.01) {
+      if (amount > 0) {
         settlements.push({
           from: debtors[i].member,
           to: creditors[j].member,
-          amount: Math.round(amount * 100) / 100,
+          amount_cents: amount,
         });
       }
       debtors[i].amount -= amount;
       creditors[j].amount -= amount;
-      if (debtors[i].amount < 0.01) i++;
-      if (creditors[j].amount < 0.01) j++;
+      if (debtors[i].amount === 0) i++;
+      if (creditors[j].amount === 0) j++;
     }
     return settlements;
   },
@@ -314,11 +397,11 @@ export const db = {
   },
 
   // Settlement records
-  async recordSettlement(groupId: number, fromMemberId: number, toMemberId: number, amount: number) {
+  async recordSettlement(groupId: number, fromMemberId: number, toMemberId: number, amountCents: number) {
     const d1 = await getDb();
     await d1
-      .prepare("INSERT INTO settlements (group_id, from_member_id, to_member_id, amount) VALUES (?, ?, ?, ?)")
-      .bind(groupId, fromMemberId, toMemberId, amount)
+      .prepare("INSERT INTO settlements (group_id, from_member_id, to_member_id, amount_cents) VALUES (?, ?, ?, ?)")
+      .bind(groupId, fromMemberId, toMemberId, amountCents)
       .run();
   },
 
@@ -340,9 +423,12 @@ export const db = {
     return results;
   },
 
-  async deleteSettlementRecord(id: number) {
+  async deleteSettlementRecord(id: number, groupId: number) {
     const d1 = await getDb();
-    await d1.prepare("DELETE FROM settlements WHERE id = ?").bind(id).run();
+    await d1
+      .prepare("DELETE FROM settlements WHERE id = ? AND group_id = ?")
+      .bind(id, groupId)
+      .run();
   },
 
   // Updated balances that account for settlement records
@@ -354,24 +440,26 @@ export const db = {
     const balances: Record<number, number> = {};
     members.forEach((m) => (balances[m.id] = 0));
 
+    // Integer cents throughout, so this is exact: a group's balances now sum to
+    // zero by construction rather than to within a rounding error of it.
     expenses.forEach((expense) => {
       expense.payers.forEach((payer) => {
-        balances[payer.member_id] += payer.amount;
+        balances[payer.member_id] += payer.amount_cents;
       });
       expense.splits.forEach((split) => {
-        balances[split.member_id] -= split.amount;
+        balances[split.member_id] -= split.amount_cents;
       });
     });
 
     // Apply settlements: from pays to, so from's balance goes up, to's goes down
     settlementRecords.forEach((s) => {
-      balances[s.from_member_id] += s.amount;
-      balances[s.to_member_id] -= s.amount;
+      balances[s.from_member_id] += s.amount_cents;
+      balances[s.to_member_id] -= s.amount_cents;
     });
 
     return members.map((m) => ({
       member: m,
-      balance: Math.round(balances[m.id] * 100) / 100,
+      balance_cents: balances[m.id],
     }));
   },
 
@@ -399,17 +487,20 @@ export const db = {
       .run();
   },
 
-  async toggleShoppingItem(id: number, checked: boolean) {
+  async toggleShoppingItem(id: number, checked: boolean, groupId: number) {
     const d1 = await getDb();
     await d1
-      .prepare("UPDATE shopping_items SET checked = ? WHERE id = ?")
-      .bind(checked ? 1 : 0, id)
+      .prepare("UPDATE shopping_items SET checked = ? WHERE id = ? AND group_id = ?")
+      .bind(checked ? 1 : 0, id, groupId)
       .run();
   },
 
-  async deleteShoppingItem(id: number) {
+  async deleteShoppingItem(id: number, groupId: number) {
     const d1 = await getDb();
-    await d1.prepare("DELETE FROM shopping_items WHERE id = ?").bind(id).run();
+    await d1
+      .prepare("DELETE FROM shopping_items WHERE id = ? AND group_id = ?")
+      .bind(id, groupId)
+      .run();
   },
 
   async clearCheckedShoppingItems(groupId: number) {

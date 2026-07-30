@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Splitta is a bill-splitting app (split shared expenses across group members). Next.js App Router app deployed to **Cloudflare Workers** via OpenNext, backed by **Cloudflare D1** (SQLite). No auth: group membership is tracked client-side in `localStorage`, and groups are shared/joined via an `invite_token`.
+Splitta is a bill-splitting app (split shared expenses across group members). Next.js App Router app deployed to **Cloudflare Workers** via OpenNext, backed by **Cloudflare D1** (SQLite). No accounts: a browser's identity is an opaque random id in an HTTP-only cookie, and groups are shared/joined via an `invite_token`.
 
 ## Commands
 
@@ -49,7 +49,8 @@ Plain numbered SQL files in `migrations/` (`NNNN_name.sql`), applied in filename
 - **Mutations = Next.js Server Actions** in `src/lib/actions.ts` (`"use server"`). Components call these directly; each action calls `db.*` then `revalidatePath()` to refresh server-rendered data. There are no route handlers / API routes for app data.
 - **Pages are Server Components** that read via `db.*` directly and are marked `export const dynamic = "force-dynamic"` (no caching — data is always fresh).
 - **Routes**: `/` (group list), `/groups/[id]` (group detail with tabs: expenses, balances, settlements, shopping, analytics), `/invite/[token]` (join-by-link flow).
-- **Membership without auth**: which groups "you" belong to lives in `localStorage` via `src/lib/local-groups.ts` (`splitta-groups` key). Opening an invite link claims the group into your local list (`auto-claim-group` / `invite-client`). The server has no concept of users.
+- **Identity and access without accounts**: `src/lib/session.ts` issues an opaque random client id in an HTTP-only cookie (`splitta-cid`), minted the first time you create a group or redeem an invite — those are server actions, and a cookie cannot be set while a server component renders. The `group_access` table maps client id → group (plus which member you said you were), and it is the whole authorization model: `src/lib/access.ts` exposes `requireAccess` for pages (404s, so an unreachable group is indistinguishable from a missing one) and `assertAccess` for actions. **Every mutating action in `actions.ts` must start with `assertAccess(groupId)`** — a matcher/proxy cannot cover them, because server actions are POSTs to whatever route they were used on. Ids coming from the client (member ids, expense ids) are additionally checked against the group with `assertMembersInGroup` / `assertExpensesInGroup`.
+  Consequences to keep in mind: clearing site data loses your groups (recoverable via the invite link) and the cookie does not follow you to another device. Real accounts are the fix, and they drop in by turning `group_access.client_id` into a user id.
 - **Balances & settlements** are computed, not stored: `db.getBalances()` sums expenses + splits and applies recorded settlements; `db.getSettlements()` runs a greedy debtor/creditor matching to produce minimal "who pays whom" transfers. Recorded settlements (`settlements` table) are actual logged payments that offset balances.
 - **Receipt OCR runs entirely in the browser** — no API, no key, no per-scan cost, and the photo never leaves the device. Two modules, deliberately split:
   - `src/lib/ocr.ts` (client-only) owns the scan, and runs **two engines**.
@@ -66,7 +67,9 @@ Plain numbered SQL files in `migrations/` (`NNNN_name.sql`), applied in filename
 
 ## Data model (D1, see migrations/)
 
-`groups` → `members` (per group) → `expenses` (each `paid_by` a member) → `expense_splits` (who owes a share of an expense). Plus `settlements` (logged payments between members), `shopping_items` (per-group shopping list). All child rows cascade-delete with their group. Expenses split evenly: `splitAmount = amount / splitMemberIds.length`.
+`groups` → `members` (per group) → `expenses` (each with `expense_payers`, who put money in) → `expense_splits` (who owes a share). Plus `settlements` (logged payments between members), `shopping_items` (per-group shopping list), and `group_access` (which client ids may see the group). All child rows cascade-delete with their group.
+
+**All money is integer cents** (`amount_cents`, migration 0012) — never floats, never a `REAL` column. `src/lib/money.ts` is the only boundary between cents and euros: `formatMoney` / `formatAmount` to display, `parseMoney` to read what a user typed, `toCents` for numeric euros (e.g. an OCR'd price). `receipt-parser.ts` is the one deliberate exception: it parses printed euro strings, and `receipt-scanner.tsx` converts at the hand-off. Splits are computed by `computeSplits` in `splits.ts`, which distributes by largest remainder so the parts always sum to the total exactly — so "does this add up?" is `===`, not an epsilon comparison. Do not reintroduce tolerances.
 
 ## Secrets / env
 

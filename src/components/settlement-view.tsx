@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, CheckCircle2, History, Trash2, Check } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { recordSettlement, deleteSettlementRecord } from "@/lib/actions";
+import { formatMoney } from "@/lib/money";
 import type { Settlement, SettlementRecord } from "@/lib/db-types";
 
 export function SettlementView({
@@ -81,7 +82,7 @@ function SettlementCard({
 
   function handleSettle() {
     startTransition(async () => {
-      await recordSettlement(groupId, s.from.id, s.to.id, s.amount);
+      await recordSettlement(groupId, s.from.id, s.to.id, s.amount_cents);
     });
   }
 
@@ -97,7 +98,7 @@ function SettlementCard({
       <div className="flex items-center gap-1 text-primary">
         <ArrowRight className="size-4" />
         <span className="font-heading font-bold text-sm tabular-nums">
-          &euro;{s.amount.toFixed(2)}
+          {formatMoney(s.amount_cents)}
         </span>
         <ArrowRight className="size-4" />
       </div>
@@ -133,7 +134,7 @@ function SettlementRecordRow({ record: r, groupId }: { record: SettlementRecord;
       <span className="text-xs font-medium truncate">{r.to_name}</span>
       <MemberAvatar name={r.to_name} color={r.to_color} size="sm" />
       <span className="ml-auto text-xs font-heading font-bold tabular-nums shrink-0">
-        &euro;{r.amount.toFixed(2)}
+        {formatMoney(r.amount_cents)}
       </span>
       <span className="text-[10px] text-muted-foreground shrink-0">{formattedDate}</span>
       <button

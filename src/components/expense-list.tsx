@@ -8,8 +8,9 @@ import { deleteExpense, updateExpense, saveReceipt } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { SplitEditor } from "@/components/split-editor";
 import { PayerEditor } from "@/components/payer-editor";
-import { computeSplits, toNumericWeights, roundCents, SPLIT_MODES, type SplitMode } from "@/lib/splits";
+import { computeSplits, toNumericWeights, SPLIT_MODES, type SplitMode } from "@/lib/splits";
 import { computePayers } from "@/lib/payers";
+import { formatAmount, formatMoney, parseMoney } from "@/lib/money";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Expense, ExpensePayer, Member } from "@/lib/db-types";
 
@@ -34,9 +35,14 @@ function initialSplitWeights(expense: Expense, mode: SplitMode): Record<number, 
   const weights: Record<number, string> = {};
   for (const s of expense.splits) {
     if (mode === "exact") {
-      weights[s.member_id] = String(s.weight ?? roundCents(s.amount));
+      // The editor's field is in euros, while the stored weight is cents.
+      weights[s.member_id] = formatAmount(s.weight ?? s.amount_cents);
     } else if (mode === "percent") {
-      weights[s.member_id] = String(s.weight ?? (expense.amount > 0 ? roundCents((s.amount / expense.amount) * 100) : 0));
+      const derived =
+        expense.amount_cents > 0
+          ? Math.round((s.amount_cents / expense.amount_cents) * 10000) / 100
+          : 0;
+      weights[s.member_id] = String(s.weight ?? derived);
     } else {
       weights[s.member_id] = String(s.weight ?? 1);
     }
@@ -121,10 +127,10 @@ function EditExpenseModal({
   onClose: () => void;
 }) {
   const [description, setDescription] = useState(expense.description);
-  const [amount, setAmount] = useState(String(expense.amount));
+  const [amount, setAmount] = useState(formatAmount(expense.amount_cents));
   const [paidBy, setPaidBy] = useState<Set<number>>(new Set(expense.payers.map((p) => p.member_id)));
   const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>(
-    Object.fromEntries(expense.payers.map((p) => [p.member_id, String(p.amount)]))
+    Object.fromEntries(expense.payers.map((p) => [p.member_id, formatAmount(p.amount_cents)]))
   );
   const initialMode = initialSplitMode(expense);
   const [splitMode, setSplitMode] = useState<SplitMode>(initialMode);
@@ -138,8 +144,9 @@ function EditExpenseModal({
   const [isPending, startTransition] = useTransition();
 
   const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
-  const splitResult = computeSplits(splitMode, Number(amount) || 0, participantIds, toNumericWeights(splitWeights));
-  const payerResult = computePayers(Number(amount) || 0, Array.from(paidBy), paidAmounts);
+  const amountCents = parseMoney(amount) ?? 0;
+  const splitResult = computeSplits(splitMode, amountCents, participantIds, toNumericWeights(splitWeights, splitMode));
+  const payerResult = computePayers(amountCents, Array.from(paidBy), paidAmounts);
 
   function toggleSplit(id: number) {
     const next = new Set(splitWith);
@@ -162,7 +169,7 @@ function EditExpenseModal({
         expense.id,
         groupId,
         description,
-        Number(amount),
+        amountCents,
         payerResult.payers,
         splitResult.splits,
         splitMode,
@@ -296,18 +303,18 @@ function EditReceiptModal({
   const receiptPayerTotals = new Map<number, number>();
   for (const e of expenses) {
     for (const p of e.payers) {
-      receiptPayerTotals.set(p.member_id, (receiptPayerTotals.get(p.member_id) ?? 0) + p.amount);
+      receiptPayerTotals.set(p.member_id, (receiptPayerTotals.get(p.member_id) ?? 0) + p.amount_cents);
     }
   }
   const [paidBy, setPaidBy] = useState<Set<number>>(new Set(receiptPayerTotals.keys()));
   const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>(
-    Object.fromEntries(Array.from(receiptPayerTotals.entries()).map(([id, amt]) => [id, String(roundCents(amt))]))
+    Object.fromEntries(Array.from(receiptPayerTotals.entries()).map(([id, amt]) => [id, formatAmount(amt)]))
   );
   const [lines, setLines] = useState<ReceiptLine[]>(() =>
     expenses.map((e) => ({
       id: e.id,
       name: e.description,
-      price: String(e.amount),
+      price: formatAmount(e.amount_cents),
       splitMemberIds: new Set(e.splits.map((s) => s.member_id)),
       category: e.category ?? undefined,
     }))
@@ -341,11 +348,12 @@ function EditReceiptModal({
     ]);
   }
 
-  const total = lines.reduce((s, l) => s + (Number(l.price) || 0), 0);
+  // Lines keep the user's raw text; the running total is cents.
+  const total = lines.reduce((s, l) => s + (parseMoney(l.price) ?? 0), 0);
   const payerResult = computePayers(total, Array.from(paidBy), paidAmounts);
   const canSave =
     payerResult.valid &&
-    lines.some((l) => l.name.trim() && Number(l.price) > 0 && l.splitMemberIds.size > 0);
+    lines.some((l) => l.name.trim() && (parseMoney(l.price) ?? 0) > 0 && l.splitMemberIds.size > 0);
 
   function togglePayer(id: number) {
     const next = new Set(paidBy);
@@ -365,7 +373,7 @@ function EditReceiptModal({
         lines.map((l) => ({
           id: l.id,
           name: l.name,
-          price: Number(l.price) || 0,
+          priceCents: parseMoney(l.price) ?? 0,
           splitMemberIds: Array.from(l.splitMemberIds),
           category: l.category,
         })),
@@ -494,7 +502,7 @@ function EditReceiptModal({
           {/* Total */}
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <span className="text-sm font-medium text-muted-foreground">Total</span>
-            <span className="text-lg font-heading font-bold tabular-nums">&euro;{total.toFixed(2)}</span>
+            <span className="text-lg font-heading font-bold tabular-nums">{formatMoney(total)}</span>
           </div>
 
           <Button
@@ -523,7 +531,7 @@ function ReceiptGroup({
 }) {
   const [open, setOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState(false);
-  const total = expenses.reduce((s, e) => s + e.amount, 0);
+  const total = expenses.reduce((s, e) => s + e.amount_cents, 0);
   const payerLabel = payerSummary(expenses[0].payers);
   const receiptName = expenses[0].receipt_name;
   const date = new Date(expenses[0].created_at + "Z");
@@ -571,7 +579,7 @@ function ReceiptGroup({
           </p>
         </div>
         <div className="text-right shrink-0 mr-1">
-          <p className="font-heading font-bold tabular-nums">&euro;{total.toFixed(2)}</p>
+          <p className="font-heading font-bold tabular-nums">{formatMoney(total)}</p>
         </div>
         <ChevronDown
           className={`size-4 text-muted-foreground transition-transform shrink-0 ${
@@ -644,7 +652,7 @@ function ReceiptItemRow({
           </p>
         </button>
         <p className="font-medium text-sm tabular-nums shrink-0">
-          &euro;{expense.amount.toFixed(2)}
+          {formatMoney(expense.amount_cents)}
         </p>
         <button
           onClick={() => {
@@ -717,7 +725,7 @@ function ExpenseItem({
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="font-heading font-bold tabular-nums">&euro;{expense.amount.toFixed(2)}</p>
+          <p className="font-heading font-bold tabular-nums">{formatMoney(expense.amount_cents)}</p>
           <p className="text-[11px] text-muted-foreground">
             {expense.splits.length} {expense.splits.length === 1 ? "person" : "people"}
           </p>

@@ -9,6 +9,7 @@ import { SplitEditor } from "@/components/split-editor";
 import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, type SplitMode } from "@/lib/splits";
 import { computePayers } from "@/lib/payers";
+import { parseMoney } from "@/lib/money";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Member } from "@/lib/db-types";
 
@@ -30,9 +31,12 @@ export function AddExpenseForm({
   const [category, setCategory] = useState<string>("");
   const [isPending, startTransition] = useTransition();
 
+  // The form keeps what the user typed as a string; cents are derived once here
+  // and everything downstream — preview, validation, submission — is integers.
+  const amountCents = parseMoney(amount) ?? 0;
   const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
-  const splitResult = computeSplits(splitMode, Number(amount) || 0, participantIds, toNumericWeights(splitWeights));
-  const payerResult = computePayers(Number(amount) || 0, Array.from(paidBy), paidAmounts);
+  const splitResult = computeSplits(splitMode, amountCents, participantIds, toNumericWeights(splitWeights, splitMode));
+  const payerResult = computePayers(amountCents, Array.from(paidBy), paidAmounts);
 
   function toggleSplit(id: number) {
     const next = new Set(splitWith);
@@ -54,6 +58,7 @@ export function AddExpenseForm({
     formData.set("groupId", String(groupId));
     formData.set("description", description);
     formData.set("amount", amount);
+    // The action re-parses `amount` itself, so what is sent stays the raw text.
     formData.set("payers", JSON.stringify(payerResult.payers));
     formData.set("splitMode", splitMode);
     formData.set("splits", JSON.stringify(splitResult.splits));

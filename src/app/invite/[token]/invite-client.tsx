@@ -1,28 +1,42 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Users, Check } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
-import { addGroupId, getMyGroupIds } from "@/lib/local-groups";
+import { joinGroup } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
-import type { Group, Member } from "@/lib/db";
+import type { Group, Member } from "@/lib/db-types";
 
 type GroupWithMembers = Group & { members: Member[] };
 
-export function InviteClient({ group }: { group: GroupWithMembers }) {
+export function InviteClient({
+  group,
+  token,
+  alreadyJoined,
+}: {
+  group: GroupWithMembers;
+  token: string;
+  alreadyJoined: boolean;
+}) {
   const router = useRouter();
-  const [alreadyJoined, setAlreadyJoined] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setAlreadyJoined(getMyGroupIds().includes(group.id));
-  }, [group.id]);
-
+  // "Who are you?" is finally recorded: joinGroup stores the answer on the
+  // access row, which is what makes the invite token mean something. It used to
+  // be discarded, and joining was a localStorage write the server never saw.
   function handleJoin(memberId: number) {
-    void memberId; // member identity not stored server-side, just used for UX
-    addGroupId(group.id);
-    router.push(`/groups/${group.id}`);
+    setError(null);
+    startTransition(async () => {
+      const result = await joinGroup(token, memberId);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      router.push(`/groups/${result.groupId}`);
+    });
   }
 
   return (
@@ -68,7 +82,8 @@ export function InviteClient({ group }: { group: GroupWithMembers }) {
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.97 }}
                         onClick={() => handleJoin(m.id)}
-                        className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left font-medium bg-muted/50 hover:bg-primary/10 hover:ring-2 hover:ring-primary transition-all"
+                        disabled={isPending}
+                        className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left font-medium bg-muted/50 hover:bg-primary/10 hover:ring-2 hover:ring-primary transition-all disabled:opacity-50"
                       >
                         <MemberAvatar name={m.name} color={m.color} size="md" />
                         <span>{m.name}</span>
@@ -76,6 +91,7 @@ export function InviteClient({ group }: { group: GroupWithMembers }) {
                     ))}
                   </div>
                 </div>
+                {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
             )}
           </div>

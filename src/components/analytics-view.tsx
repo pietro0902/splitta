@@ -12,6 +12,7 @@ import {
   Tooltip,
 } from "recharts";
 import { MemberAvatar, MemberAvatarStack } from "@/components/member-avatar";
+import { CURRENCY, formatMoney } from "@/lib/money";
 import type { Member, Expense } from "@/lib/db-types";
 
 function payerSummary(payers: Expense["payers"]): string {
@@ -35,25 +36,28 @@ export function AnalyticsView({
     );
   }
 
-  const total = expenses.reduce((s, e) => s + e.amount, 0);
-  const avg = total / expenses.length;
+  // Every `amount` below is cents, so the sums are exact and the rounding that
+  // used to follow each one is gone. Only the average needs rounding, being the
+  // one figure here that isn't a sum.
+  const total = expenses.reduce((s, e) => s + e.amount_cents, 0);
+  const avg = Math.round(total / expenses.length);
 
   // Spending per member (who paid)
   const paidByMember = members.map((m) => {
     const amount = expenses.reduce((s, e) => {
       const paid = e.payers.find((p) => p.member_id === m.id);
-      return s + (paid?.amount ?? 0);
+      return s + (paid?.amount_cents ?? 0);
     }, 0);
-    return { member: m, amount: Math.round(amount * 100) / 100 };
+    return { member: m, amount };
   }).sort((a, b) => b.amount - a.amount);
 
   // Cost per member (what they owe based on splits)
   const costByMember = members.map((m) => {
     const amount = expenses.reduce((s, e) => {
       const split = e.splits.find((sp) => sp.member_id === m.id);
-      return s + (split?.amount ?? 0);
+      return s + (split?.amount_cents ?? 0);
     }, 0);
-    return { member: m, amount: Math.round(amount * 100) / 100 };
+    return { member: m, amount };
   }).sort((a, b) => b.amount - a.amount);
 
   // Spending over time (by day)
@@ -63,15 +67,15 @@ export function AnalyticsView({
       day: "2-digit",
       month: "short",
     });
-    byDay.set(day, (byDay.get(day) || 0) + e.amount);
+    byDay.set(day, (byDay.get(day) || 0) + e.amount_cents);
   }
   const dailyData = Array.from(byDay.entries())
-    .map(([day, amount]) => ({ day, amount: Math.round(amount * 100) / 100 }))
+    .map(([day, amount]) => ({ day, amount }))
     .reverse();
 
   // Top expenses
   const topExpenses = [...expenses]
-    .sort((a, b) => b.amount - a.amount)
+    .sort((a, b) => b.amount_cents - a.amount_cents)
     .slice(0, 5);
 
   // Pie data for who paid
@@ -83,7 +87,7 @@ export function AnalyticsView({
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-xl border border-border bg-card p-4 text-center">
           <p className="text-xs text-muted-foreground mb-1">Total</p>
-          <p className="font-heading text-lg font-bold tabular-nums">&euro;{total.toFixed(2)}</p>
+          <p className="font-heading text-lg font-bold tabular-nums">{formatMoney(total)}</p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4 text-center">
           <p className="text-xs text-muted-foreground mb-1">Expenses</p>
@@ -91,7 +95,7 @@ export function AnalyticsView({
         </div>
         <div className="rounded-xl border border-border bg-card p-4 text-center">
           <p className="text-xs text-muted-foreground mb-1">Average</p>
-          <p className="font-heading text-lg font-bold tabular-nums">&euro;{avg.toFixed(2)}</p>
+          <p className="font-heading text-lg font-bold tabular-nums">{formatMoney(avg)}</p>
         </div>
       </div>
 
@@ -118,7 +122,7 @@ export function AnalyticsView({
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value) => [`€${Number(value).toFixed(2)}`, "Paid"]}
+                  formatter={(value) => [formatMoney(Number(value)), "Paid"]}
                   labelFormatter={(_, payload) => payload[0]?.payload?.member?.name ?? ""}
                   contentStyle={{
                     borderRadius: "12px",
@@ -134,7 +138,7 @@ export function AnalyticsView({
               {pieData.map((d) => (
                 <div key={d.member.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <div className="size-2.5 rounded-full" style={{ backgroundColor: d.member.color }} />
-                  {d.member.name}: &euro;{d.amount.toFixed(2)}
+                  {d.member.name}: {formatMoney(d.amount)}
                 </div>
               ))}
             </div>
@@ -159,7 +163,7 @@ export function AnalyticsView({
                   />
                 </div>
                 <span className="text-sm font-heading font-bold tabular-nums w-20 text-right">
-                  &euro;{d.amount.toFixed(2)}
+                  {formatMoney(d.amount)}
                 </span>
               </div>
             );
@@ -184,11 +188,12 @@ export function AnalyticsView({
                   tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                   axisLine={false}
                   tickLine={false}
-                  tickFormatter={(v) => `€${v}`}
+                  // Whole euros: an axis tick has no room for the cents.
+                  tickFormatter={(v) => `${CURRENCY}${Math.round(Number(v) / 100)}`}
                   width={50}
                 />
                 <Tooltip
-                  formatter={(value) => [`€${Number(value).toFixed(2)}`, "Spent"]}
+                  formatter={(value) => [formatMoney(Number(value)), "Spent"]}
                   contentStyle={{
                     borderRadius: "12px",
                     border: "1px solid var(--border)",
@@ -219,7 +224,7 @@ export function AnalyticsView({
                 <p className="text-sm font-medium truncate">{e.description}</p>
                 <p className="text-xs text-muted-foreground">{payerSummary(e.payers)}</p>
               </div>
-              <p className="font-heading font-bold tabular-nums">&euro;{e.amount.toFixed(2)}</p>
+              <p className="font-heading font-bold tabular-nums">{formatMoney(e.amount_cents)}</p>
             </div>
           ))}
         </div>

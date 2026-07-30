@@ -17,7 +17,10 @@ export type ExpenseRow = {
   id: number;
   group_id: number;
   description: string;
-  amount: number;
+  // Every monetary field in this file is an integer number of cents, matching
+  // the columns as of migration 0012. Euros exist only in what the user reads
+  // and types; src/lib/money.ts is the only place the two meet.
+  amount_cents: number;
   created_at: string;
   receipt_id: string | null;
   receipt_name: string | null;
@@ -31,7 +34,9 @@ export type ExpenseSplit = {
   member_id: number;
   member_name: string;
   member_color: string;
-  amount: number;
+  amount_cents: number;
+  // Raw input for the expense's split mode: cents for 'exact', a percentage
+  // for 'percent', a share count for 'shares', null for an equal split.
   weight: number | null;
 };
 
@@ -41,7 +46,7 @@ export type ExpensePayer = {
   member_id: number;
   member_name: string;
   member_color: string;
-  amount: number;
+  amount_cents: number;
 };
 
 export type Expense = ExpenseRow & { splits: ExpenseSplit[]; payers: ExpensePayer[] };
@@ -49,18 +54,18 @@ export type Expense = ExpenseRow & { splits: ExpenseSplit[]; payers: ExpensePaye
 export type Settlement = {
   from: Member;
   to: Member;
-  amount: number;
+  amount_cents: number;
 };
 
 export type GroupWithDetails = Group & {
   members: Member[];
   expenses: Expense[];
-  totalExpenses: number;
+  totalExpensesCents: number;
 };
 
 export type GroupSummary = Group & {
   members: Member[];
-  totalExpenses: number;
+  totalExpensesCents: number;
 };
 
 export type SettlementRecord = {
@@ -68,7 +73,7 @@ export type SettlementRecord = {
   group_id: number;
   from_member_id: number;
   to_member_id: number;
-  amount: number;
+  amount_cents: number;
   created_at: string;
   from_name: string;
   from_color: string;

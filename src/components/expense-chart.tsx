@@ -7,6 +7,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
+import { formatMoney } from "@/lib/money";
 import type { Member, Expense } from "@/lib/db-types";
 
 export function ExpenseChart({
@@ -16,12 +17,15 @@ export function ExpenseChart({
   expenses: Expense[];
   members: Member[];
 }) {
+  // `value` is cents: the pie only needs the proportions, and the tooltip
+  // formats it back to euros. Keeping the raw integer avoids reintroducing a
+  // float just to draw a slice.
   const spendingByMember = members.map((m) => {
     const total = expenses.reduce((sum, e) => {
       const paid = e.payers.find((p) => p.member_id === m.id);
-      return sum + (paid?.amount ?? 0);
+      return sum + (paid?.amount_cents ?? 0);
     }, 0);
-    return { name: m.name, value: Math.round(total * 100) / 100, color: m.color };
+    return { name: m.name, value: total, color: m.color };
   }).filter((d) => d.value > 0);
 
   if (spendingByMember.length === 0) return null;
@@ -45,7 +49,7 @@ export function ExpenseChart({
             ))}
           </Pie>
           <Tooltip
-            formatter={(value) => [`€${Number(value).toFixed(2)}`, "Paid"]}
+            formatter={(value) => [formatMoney(Number(value)), "Paid"]}
             contentStyle={{
               borderRadius: "12px",
               border: "1px solid var(--border)",

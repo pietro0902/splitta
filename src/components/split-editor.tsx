@@ -2,6 +2,7 @@
 
 import { MemberAvatar } from "@/components/member-avatar";
 import { SPLIT_MODES, type SplitMode, type SplitResult } from "@/lib/splits";
+import { formatMoney } from "@/lib/money";
 import type { Member } from "@/lib/db-types";
 
 const SUFFIX: Record<Exclude<SplitMode, "equal">, string> = {
@@ -84,7 +85,7 @@ export function SplitEditor({
 
               {isOn && mode === "equal" && (
                 <span className="text-sm font-medium tabular-nums text-muted-foreground shrink-0">
-                  €{owed.toFixed(2)}
+                  {formatMoney(owed)}
                 </span>
               )}
 
@@ -107,7 +108,7 @@ export function SplitEditor({
                   </div>
                   {mode !== "exact" && (
                     <span className="w-14 text-right text-xs tabular-nums text-muted-foreground shrink-0">
-                      €{owed.toFixed(2)}
+                      {formatMoney(owed)}
                     </span>
                   )}
                 </div>
@@ -122,7 +123,7 @@ export function SplitEditor({
 
 function splitSummary(mode: SplitMode, result: SplitResult): string {
   if (result.splits.length === 0) return "";
-  if (mode === "equal") return `€${(result.splits[0]?.amount ?? 0).toFixed(2)} each`;
+  if (mode === "equal") return `${formatMoney(result.splits[0]?.amount ?? 0)} each`;
   if (mode === "percent") return "100% assigned";
   if (mode === "exact") return "Adds up ✓";
   return "Split by shares";

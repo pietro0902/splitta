@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, X, Users, Sparkles } from "lucide-react";
 import { createGroup } from "@/lib/actions";
-import { addGroupId } from "@/lib/local-groups";
 import { Button } from "@/components/ui/button";
 
 const EMOJIS = ["👥", "🏠", "✈️", "🍕", "🎉", "💼", "🏖️", "🎵", "🚗", "🛒"];
@@ -39,8 +38,9 @@ export function CreateGroupDialog() {
     formData.set("members", members.join(","));
     startTransition(async () => {
       const result = await createGroup(formData);
+      // The action records the creator's access server-side, so there is
+      // nothing left to write on this device.
       if (result && "groupId" in result && result.groupId) {
-        addGroupId(result.groupId);
         router.push(`/groups/${result.groupId}`);
       }
     });
