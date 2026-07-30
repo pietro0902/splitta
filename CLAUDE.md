@@ -17,6 +17,7 @@ npm run dev              # local dev (Next dev server, uses local SQLite — see
 npm run lint             # eslint
 npm run build            # next build (webpack) — type/build check
 npm run preview          # build for CF + run under wrangler locally (real workerd runtime)
+npm run preview:stop     # stop a preview whose terminal is gone (Windows; see below)
 npm run deploy           # build + deploy to Cloudflare
 
 npm run db:migrate:local   # apply migrations/ to local D1 (wrangler --local)
@@ -29,8 +30,8 @@ npm run icons            # redraw the app icons from scripts/generate-icons.mjs
 ```
 
 > `npm run dev` is currently broken: Next 16 defaults to Turbopack and `next.config.ts` carries a webpack config, which is a hard error. Use `npx next dev --webpack` — and note `better-sqlite3` is missing from `package.json` entirely, so any DB access under `next dev` throws. Until both are fixed, verify against `npm run preview` (real workerd + local D1).
->
-> `wrangler dev` leaves orphaned `workerd.exe` processes on Windows that lock `.open-next`, so the next build dies with `EBUSY`. Clear them with `Get-Process workerd | Stop-Process -Force`.
+
+**On Windows, `build:cf` used to fail with `EBUSY: resource busy or locked, rmdir '...\.open-next\assets'`** (from OpenNext's `initOutputDir`). `wrangler dev` spawns `workerd.exe` children; kill the npm parent without them — closing the terminal, Task Manager, a Ctrl-C the shell doesn't forward — and they survive holding an open handle on `.open-next\assets`, which the next build begins by deleting. `scripts/stop-preview.mjs` clears them and runs automatically before every `build:cf` (npm's `prebuild:cf` hook), so this should no longer reach you; `npm run preview:stop` is the same thing by hand. It only stops processes started from *this* checkout's `node_modules`, so another project's dev server is left alone, and it exits immediately off Windows — POSIX both forwards the signal to the process group and lets you unlink an open file. Wrangler 4.x has no flag that does this for you.
 
 **Deploying with a pending migration** has no atomic swap, so never use `npm run deploy` for it — it rebuilds first and stretches the window in which the live Worker and the schema disagree. Instead: `npm run build:cf` (slow, no impact), then `npm run db:migrate:remote`, then `npx opennextjs-cloudflare deploy` (seconds, publishes the artefact already built).
 
