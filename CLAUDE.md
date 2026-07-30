@@ -17,6 +17,7 @@ npm run dev              # local dev (Next dev server, uses local SQLite — see
 npm run lint             # eslint
 npm run build            # next build (webpack) — type/build check
 npm run preview          # build for CF + run under wrangler locally (real workerd runtime)
+npm run preview:stop     # stop a preview whose terminal is gone (Windows; see below)
 npm run deploy           # build + deploy to Cloudflare
 
 npm run db:migrate:local   # apply migrations/ to local D1 (wrangler --local)
@@ -26,6 +27,8 @@ npm run db:migrate:remote  # apply migrations/ to the remote D1 database
 ```bash
 npm run check:parser     # exercise the receipt parser on text fixtures (no browser/OCR needed)
 ```
+
+**On Windows, `build:cf` used to fail with `EBUSY: resource busy or locked, rmdir '...\.open-next\assets'`** (from OpenNext's `initOutputDir`). `wrangler dev` spawns `workerd.exe` children; kill the npm parent without them — closing the terminal, Task Manager, a Ctrl-C the shell doesn't forward — and they survive holding an open handle on `.open-next\assets`, which the next build begins by deleting. `scripts/stop-preview.mjs` clears them and runs automatically before every `build:cf` (npm's `prebuild:cf` hook), so this should no longer reach you; `npm run preview:stop` is the same thing by hand. It only stops processes started from *this* checkout's `node_modules`, so another project's dev server is left alone, and it exits immediately off Windows — POSIX both forwards the signal to the process group and lets you unlink an open file. Wrangler 4.x has no flag that does this for you.
 
 There is no test suite. Validate changes with `npm run lint` and `npm run build`. When touching receipt extraction, also run `npm run check:parser` — it exits non-zero on failure — and add the failing receipt's OCR text as a new case when you hit one that scans badly.
 
