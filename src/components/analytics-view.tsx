@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { MemberAvatar, MemberAvatarStack } from "@/components/member-avatar";
 import { CURRENCY, formatMoney } from "@/lib/money";
+import { entryAmountCents, groupExpenses, receiptPayers } from "@/lib/receipts";
 import type { Member, Expense } from "@/lib/db-types";
 
 function payerSummary(payers: Expense["payers"]): string {
@@ -73,9 +74,26 @@ export function AnalyticsView({
     .map(([day, amount]) => ({ day, amount }))
     .reverse();
 
-  // Top expenses
-  const topExpenses = [...expenses]
-    .sort((a, b) => b.amount_cents - a.amount_cents)
+  // Top expenses, ranked over receipts rather than their line items: a weekly
+  // shop is one €87 expense, not twelve chances for "CAROTE CPQ IT" to place
+  // in a group's five biggest.
+  const topExpenses = groupExpenses(expenses)
+    .map((entry) =>
+      entry.type === "single"
+        ? {
+            key: `e${entry.expense.id}`,
+            label: entry.expense.description,
+            payers: entry.expense.payers,
+            amount: entry.expense.amount_cents,
+          }
+        : {
+            key: `r${entry.receiptId}`,
+            label: entry.expenses[0].receipt_name || "Receipt",
+            payers: receiptPayers(entry.expenses),
+            amount: entryAmountCents(entry),
+          }
+    )
+    .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
 
   // Pie data for who paid
@@ -215,16 +233,16 @@ export function AnalyticsView({
         <div className="space-y-2">
           {topExpenses.map((e, i) => (
             <div
-              key={e.id}
+              key={e.key}
               className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
             >
               <span className="text-sm font-bold text-muted-foreground w-5">{i + 1}</span>
               <MemberAvatarStack members={e.payers.map((p) => ({ name: p.member_name, color: p.member_color }))} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{e.description}</p>
+                <p className="text-sm font-medium truncate">{e.label}</p>
                 <p className="text-xs text-muted-foreground">{payerSummary(e.payers)}</p>
               </div>
-              <p className="font-heading font-bold tabular-nums">{formatMoney(e.amount_cents)}</p>
+              <p className="font-heading font-bold tabular-nums">{formatMoney(e.amount)}</p>
             </div>
           ))}
         </div>

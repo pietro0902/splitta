@@ -11,6 +11,7 @@ import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, SPLIT_MODES, type SplitMode } from "@/lib/splits";
 import { computePayers } from "@/lib/payers";
 import { formatAmount, formatMoney, parseMoney } from "@/lib/money";
+import { groupExpenses, receiptDate, receiptPayers } from "@/lib/receipts";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Expense, ExpensePayer, Member } from "@/lib/db-types";
 
@@ -48,37 +49,6 @@ function initialSplitWeights(expense: Expense, mode: SplitMode): Record<number, 
     }
   }
   return weights;
-}
-
-type ExpenseEntry =
-  | { type: "single"; expense: Expense }
-  | { type: "receipt"; receiptId: string; expenses: Expense[] };
-
-function groupExpenses(expenses: Expense[]): ExpenseEntry[] {
-  const entries: ExpenseEntry[] = [];
-  const receiptMap = new Map<string, Expense[]>();
-
-  for (const expense of expenses) {
-    if (expense.receipt_id) {
-      const arr = receiptMap.get(expense.receipt_id) || [];
-      arr.push(expense);
-      receiptMap.set(expense.receipt_id, arr);
-    } else {
-      entries.push({ type: "single", expense });
-    }
-  }
-
-  for (const [receiptId, exps] of receiptMap) {
-    entries.push({ type: "receipt", receiptId, expenses: exps });
-  }
-
-  entries.sort((a, b) => {
-    const dateA = a.type === "single" ? a.expense.created_at : a.expenses[0].created_at;
-    const dateB = b.type === "single" ? b.expense.created_at : b.expenses[0].created_at;
-    return dateB.localeCompare(dateA);
-  });
-
-  return entries;
 }
 
 export function ExpenseList({
@@ -283,7 +253,6 @@ type ReceiptLine = {
   name: string;
   price: string;
   splitMemberIds: Set<number>;
-  category?: string;
 };
 
 function EditReceiptModal({
@@ -300,6 +269,11 @@ function EditReceiptModal({
   const receiptId = expenses[0].receipt_id!;
   const originalIds = expenses.map((e) => e.id);
   const [receiptName, setReceiptName] = useState(expenses[0].receipt_name ?? "");
+  // A receipt has one category; a line keeping its own would have no way to be
+  // set, since the editor deliberately has one control for the whole shop.
+  const [category, setCategory] = useState<string>(
+    expenses.find((e) => e.category)?.category ?? ""
+  );
   const receiptPayerTotals = new Map<number, number>();
   for (const e of expenses) {
     for (const p of e.payers) {
@@ -316,7 +290,6 @@ function EditReceiptModal({
       name: e.description,
       price: formatAmount(e.amount_cents),
       splitMemberIds: new Set(e.splits.map((s) => s.member_id)),
-      category: e.category ?? undefined,
     }))
   );
   const [isPending, startTransition] = useTransition();
@@ -375,7 +348,7 @@ function EditReceiptModal({
           name: l.name,
           priceCents: parseMoney(l.price) ?? 0,
           splitMemberIds: Array.from(l.splitMemberIds),
-          category: l.category,
+          category: category || undefined,
         })),
         originalIds
       );
@@ -419,6 +392,29 @@ function EditReceiptModal({
               placeholder="e.g. Grocery store, Dinner..."
               className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
             />
+          </div>
+
+          {/* Category, applied to every line on save. This is also how the
+              receipts scanned before the scanner asked for one get fixed. */}
+          <div>
+            <label className="text-sm font-medium text-muted-foreground mb-2 block">Category</label>
+            <div className="flex flex-wrap gap-1.5">
+              {EXPENSE_CATEGORIES.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setCategory(category === cat.id ? "" : cat.id)}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                    category === cat.id
+                      ? "bg-primary/10 ring-2 ring-primary text-primary"
+                      : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <span>{cat.emoji}</span>
+                  <span>{cat.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Paid by */}
@@ -532,9 +528,9 @@ function ReceiptGroup({
   const [open, setOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState(false);
   const total = expenses.reduce((s, e) => s + e.amount_cents, 0);
-  const payerLabel = payerSummary(expenses[0].payers);
+  const payerLabel = payerSummary(receiptPayers(expenses));
   const receiptName = expenses[0].receipt_name;
-  const date = new Date(expenses[0].created_at + "Z");
+  const date = new Date(receiptDate(expenses) + "Z");
   const formattedDate = date.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",

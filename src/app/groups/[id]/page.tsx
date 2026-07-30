@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { requireAccess } from "@/lib/access";
 import { formatMoney } from "@/lib/money";
+import { countExpenseEntries } from "@/lib/receipts";
 
 export const dynamic = "force-dynamic";
 import Link from "next/link";
@@ -89,7 +90,7 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
             <ShoppingList items={shoppingItems} groupId={group.id} members={group.members} />
           }
           analyticsTab={<AnalyticsView expenses={group.expenses} members={group.members} />}
-          expenseCount={group.expenses.length}
+          expenseCount={countExpenseEntries(group.expenses)}
           shoppingCount={uncheckedShoppingCount}
         />
       </main>

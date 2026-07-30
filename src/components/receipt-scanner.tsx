@@ -18,6 +18,7 @@ import { formatMoney, toCents } from "@/lib/money";
 import { createExpensesFromReceipt } from "@/lib/actions";
 import { scanReceipt, type OcrProgress } from "@/lib/ocr";
 import type { ParsedItem } from "@/lib/receipt-parser";
+import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Member } from "@/lib/db-types";
 
 type ItemWithSplits = ParsedItem & {
@@ -41,6 +42,7 @@ export function ReceiptScanner({
   const [paidBy, setPaidBy] = useState<Set<number>>(new Set());
   const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>({});
   const [receiptName, setReceiptName] = useState("");
+  const [category, setCategory] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState<OcrProgress | null>(null);
@@ -180,7 +182,8 @@ export function ReceiptScanner({
           priceCents: toCents(item.price),
           splitMemberIds: Array.from(item.splitMemberIds),
         })),
-        receiptName
+        receiptName,
+        category || undefined
       );
       reset();
     });
@@ -194,6 +197,7 @@ export function ReceiptScanner({
     setPaidBy(new Set());
     setPaidAmounts({});
     setReceiptName("");
+    setCategory("");
     setError(null);
     setDeclaredTotal(null);
     setProgress(null);
@@ -349,6 +353,32 @@ export function ReceiptScanner({
                       placeholder="e.g. Grocery store, Dinner..."
                       className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
                     />
+                  </div>
+
+                  {/* One category for the whole receipt. Asked here because
+                      this is the only moment the shop is on screen; without it
+                      every scanned line is stored uncategorised and drops out
+                      of the analytics breakdown entirely. */}
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                      Category (optional)
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {EXPENSE_CATEGORIES.map((cat) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setCategory(category === cat.id ? "" : cat.id)}
+                          className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                            category === cat.id
+                              ? "bg-primary/10 ring-2 ring-primary text-primary"
+                              : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          <span>{cat.emoji}</span>
+                          <span>{cat.label}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Paid by */}

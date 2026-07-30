@@ -181,7 +181,12 @@ export async function createExpensesFromReceipt(
   groupId: number,
   payers: PayerInput[],
   items: { name: string; priceCents: number; splitMemberIds: number[] }[],
-  receiptName?: string
+  receiptName?: string,
+  // One category for the whole receipt. This argument was simply missing, so
+  // every line a scan ever created was stored uncategorised -- 167 of the 268
+  // expenses in production, which is most of the money the analytics tab is
+  // supposed to break down.
+  category?: string
 ) {
   await assertAccess(groupId);
 
@@ -197,7 +202,7 @@ export async function createExpensesFromReceipt(
   for (let k = 0; k < valid.length; k++) {
     const item = valid[k];
     const { splits } = computeSplits("equal", item.priceCents, item.splitMemberIds, {});
-    await db.addExpense(groupId, item.name, item.priceCents, payersByLine[k], splits, "equal", receiptId, name);
+    await db.addExpense(groupId, item.name, item.priceCents, payersByLine[k], splits, "equal", receiptId, name, category);
   }
   revalidatePath(`/groups/${groupId}`);
 }
