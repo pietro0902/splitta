@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, X, UserCheck } from "lucide-react";
+import { SheetOverlay } from "@/components/ui/sheet-overlay";
 import { createGroup } from "@/lib/actions";
 import { GROUP_EMOJIS } from "@/lib/db-types";
 
@@ -13,7 +14,7 @@ export function CreateGroupDialog({
   variant = "pill",
 }: {
   variant?: "pill" | "rail";
-} = {}) {
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -83,13 +84,7 @@ export function CreateGroupDialog({
 
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
-            onClick={(e) => e.target === e.currentTarget && reset()}
-          >
+          <SheetOverlay onClose={reset}>
             <motion.div
               initial={{ opacity: 0, y: 40 }}
               animate={{ opacity: 1, y: 0 }}
@@ -215,7 +210,7 @@ export function CreateGroupDialog({
                 </button>
               </div>
             </motion.div>
-          </motion.div>
+          </SheetOverlay>
         )}
       </AnimatePresence>
     </>

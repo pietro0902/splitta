@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trash2, Receipt, ChevronDown, X, Plus, TriangleAlert } from "lucide-react";
+import { SheetOverlay } from "@/components/ui/sheet-overlay";
 import { MemberAvatar } from "@/components/member-avatar";
 import { deleteExpense, updateExpense, saveReceipt } from "@/lib/actions";
 import { SplitEditor } from "@/components/split-editor";
@@ -116,13 +117,7 @@ function Sheet({
   wide?: boolean;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
+    <SheetOverlay onClose={onClose}>
       <motion.div
         initial={{ opacity: 0, y: 60 }}
         animate={{ opacity: 1, y: 0 }}
@@ -144,7 +139,7 @@ function Sheet({
         </div>
         {children}
       </motion.div>
-    </motion.div>
+    </SheetOverlay>
   );
 }
 

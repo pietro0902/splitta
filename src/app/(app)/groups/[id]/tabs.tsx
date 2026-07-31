@@ -55,6 +55,11 @@ export function GroupTabs({
               (tab.id === "shopping" && shoppingCount > 0 && shoppingCount) ||
               null;
             const isActive = active === tab.id;
+            // Above `lg` a side tab is not in this row and the column shows the
+            // expense list instead, so "Spese" is what is selected up there --
+            // without this, widening the window while on "Saldi" leaves every
+            // visible pill looking unselected.
+            const activeAtLg = sideActive && tab.id === "expenses";
             return (
               <button
                 key={tab.id}
@@ -65,12 +70,14 @@ export function GroupTabs({
                   isActive
                     ? "border border-brand-border bg-brand-field text-primary"
                     : "border border-transparent text-muted-foreground hover:text-foreground"
-                }`}
+                } ${activeAtLg ? "lg:border-brand-border lg:bg-brand-field lg:text-primary" : ""}`}
               >
                 {tab.label}
                 {badge && (
                   <span
-                    className={`figure text-[11px] ${isActive ? "text-primary/70" : "text-muted-foreground/70"}`}
+                    className={`figure text-[11px] ${isActive ? "text-primary/70" : "text-muted-foreground/70"} ${
+                      activeAtLg ? "lg:text-primary/70" : ""
+                    }`}
                   >
                     {badge}
                   </span>
@@ -82,9 +89,18 @@ export function GroupTabs({
 
         {/* Above `lg` the two side tabs cannot be reached from the row above, so
             their state falls back to the expense list rather than leaving this
-            column blank after a resize. */}
+            column blank after a resize. Under `lg` they *are* reachable and the
+            aside below is the answer, so the fallback has to stay hidden --
+            otherwise tapping "Saldi" on a phone puts eighty expense rows
+            between the tap and the balances it asked for. */}
         <div className="mt-4">
-          {active === "shopping" ? shoppingTab : active === "stats" ? analyticsTab : expensesTab}
+          {active === "shopping" ? (
+            shoppingTab
+          ) : active === "stats" ? (
+            analyticsTab
+          ) : (
+            <div className={sideActive ? "hidden lg:block" : undefined}>{expensesTab}</div>
+          )}
         </div>
       </div>
 

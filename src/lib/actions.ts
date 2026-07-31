@@ -23,6 +23,16 @@ function revalidateApp() {
   revalidatePath("/", "layout");
 }
 
+// For changes that cannot move a figure outside their own group. The shopping
+// list is the whole of that category: no other screen reads it, and the rail
+// and the homepage row show balances and member counts it does not touch. Going
+// through `revalidateApp` for a ticked checkbox threw away the client's cached
+// payload for every other route in the app — a full refetch on the next
+// navigation, once per tick, which is exactly the wrong trade in a supermarket.
+function revalidateGroup(groupId: number) {
+  revalidatePath(`/groups/${groupId}`);
+}
+
 function parseSplitMode(raw: FormDataEntryValue | null): SplitMode {
   const value = String(raw ?? "equal");
   return (SPLIT_MODES.some((m) => m.id === value) ? value : "equal") as SplitMode;
@@ -296,9 +306,8 @@ export async function addMember(
     return { error: "C'è già qualcuno con questo nome" };
   }
 
+  // The homepage row counts members too, which `revalidateApp` already covers.
   await db.addMember(groupId, trimmed);
-  revalidateApp();
-  // The homepage row counts members too.
   revalidateApp();
 }
 
@@ -444,23 +453,23 @@ export async function addShoppingItem(formData: FormData) {
   if (addedByMemberId !== null) await assertMembersInGroup(groupId, [addedByMemberId]);
 
   await db.addShoppingItem(groupId, name, quantity, addedByMemberId);
-  revalidateApp();
+  revalidateGroup(groupId);
 }
 
 export async function toggleShoppingItem(id: number, checked: boolean, groupId: number) {
   await assertAccess(groupId);
   await db.toggleShoppingItem(id, checked, groupId);
-  revalidateApp();
+  revalidateGroup(groupId);
 }
 
 export async function deleteShoppingItem(id: number, groupId: number) {
   await assertAccess(groupId);
   await db.deleteShoppingItem(id, groupId);
-  revalidateApp();
+  revalidateGroup(groupId);
 }
 
 export async function clearCheckedShoppingItems(groupId: number) {
   await assertAccess(groupId);
   await db.clearCheckedShoppingItems(groupId);
-  revalidateApp();
+  revalidateGroup(groupId);
 }

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, X } from "lucide-react";
 import { addExpense } from "@/lib/actions";
+import { SheetOverlay } from "@/components/ui/sheet-overlay";
 import { SplitEditor } from "@/components/split-editor";
 import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, type SplitMode } from "@/lib/splits";
@@ -106,13 +107,7 @@ export function AddExpenseForm({
 
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-4"
-            onClick={(e) => e.target === e.currentTarget && reset()}
-          >
+          <SheetOverlay onClose={reset}>
             <motion.div
               initial={{ opacity: 0, y: 60 }}
               animate={{ opacity: 1, y: 0 }}
@@ -215,7 +210,7 @@ export function AddExpenseForm({
                 </button>
               </div>
             </motion.div>
-          </motion.div>
+          </SheetOverlay>
         )}
       </AnimatePresence>
     </>

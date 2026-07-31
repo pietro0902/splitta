@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Settings2, X, LogOut, Trash2 } from "lucide-react";
+import { SheetOverlay } from "@/components/ui/sheet-overlay";
 import { MemberAvatar } from "@/components/member-avatar";
 import { updateGroup, removeMember, leaveGroup, deleteGroup } from "@/lib/actions";
 import { GROUP_EMOJIS } from "@/lib/db-types";
@@ -71,13 +72,7 @@ export function GroupSettings({
 
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-4"
-            onClick={(e) => e.target === e.currentTarget && close()}
-          >
+          <SheetOverlay onClose={close}>
             <motion.div
               initial={{ opacity: 0, y: 60 }}
               animate={{ opacity: 1, y: 0 }}
@@ -209,7 +204,7 @@ export function GroupSettings({
                 </div>
               </div>
             </motion.div>
-          </motion.div>
+          </SheetOverlay>
         )}
       </AnimatePresence>
     </>

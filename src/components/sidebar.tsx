@@ -7,7 +7,19 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CreateGroupDialog } from "@/components/create-group-dialog";
 import { formatMoney } from "@/lib/money";
 import { groupTint, initials } from "@/lib/tints";
-import type { GroupSummary } from "@/lib/db-types";
+
+// Deliberately not `GroupSummary`. This is a client component, so whatever it
+// declares is serialized into the payload of every screen inside (app) --
+// including the ones below `lg`, where the rail is `display:none` and none of
+// it is ever drawn. A `GroupSummary` would put every group's `invite_token`
+// (the join credential) and full member list in that payload; these four
+// fields are what a row actually renders.
+export type RailGroup = {
+  id: number;
+  name: string;
+  emoji: string;
+  myBalanceCents: number | null;
+};
 
 // Desktop only, and deliberately so: on a phone the group list *is* the
 // homepage and a permanent rail would eat a third of the screen. Above `lg`
@@ -18,7 +30,7 @@ import type { GroupSummary } from "@/lib/db-types";
 // inside it. Which one is current comes from the pathname rather than a prop:
 // a layout only receives params for its own dynamic segments, and this one has
 // none -- it sits above `groups/[id]`, not inside it.
-export function Sidebar({ groups }: { groups: GroupSummary[] }) {
+export function Sidebar({ groups }: { groups: RailGroup[] }) {
   const pathname = usePathname();
   const activeGroupId = Number(pathname.match(/^\/groups\/(\d+)/)?.[1]);
 
