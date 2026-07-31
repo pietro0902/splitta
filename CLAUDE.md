@@ -57,6 +57,7 @@ Plain numbered SQL files in `migrations/` (`NNNN_name.sql`), applied in filename
 - **Mutations = Next.js Server Actions** in `src/lib/actions.ts` (`"use server"`). Components call these directly; each action calls `db.*` then `revalidatePath()` to refresh server-rendered data. There are no route handlers / API routes for app data.
 - **Pages are Server Components** that read via `db.*` directly and are marked `export const dynamic = "force-dynamic"` (no caching — data is always fresh).
 - **Routes**: `/` (group list), `/groups/[id]` (group detail with tabs: expenses, balances, settlements, shopping, analytics), `/invite/[token]` (join-by-link flow).
+- **Error and loading states**: `app/error.tsx` (dynamic pages read D1 on every request, so `reset()` is a real retry), `app/not-found.tsx` (reached routinely, not exceptionally — `requireAccess` 404s any group you may not see), `app/global-error.tsx` (ships its own `<html>` and hard-codes the dark ground, since nothing the root layout sets up is available to it) and `app/groups/[id]/loading.tsx`.
 - **Identity and access without accounts**: `src/lib/session.ts` issues an opaque random client id in an HTTP-only cookie (`splitta-cid`), minted the first time you create a group or redeem an invite — those are server actions, and a cookie cannot be set while a server component renders. The `group_access` table maps client id → group (plus which member you said you were), and it is the whole authorization model: `src/lib/access.ts` exposes `requireAccess` for pages (404s, so an unreachable group is indistinguishable from a missing one) and `assertAccess` for actions. **Every mutating action in `actions.ts` must start with `assertAccess(groupId)`** — a matcher/proxy cannot cover them, because server actions are POSTs to whatever route they were used on. Ids coming from the client (member ids, expense ids) are additionally checked against the group with `assertMembersInGroup` / `assertExpensesInGroup`.
   Consequences to keep in mind: clearing site data loses your groups (recoverable via the invite link) and the cookie does not follow you to another device. Real accounts are the fix, and they drop in by turning `group_access.client_id` into a user id.
 - **Balances & settlements** are computed, not stored: `db.getBalances()` sums expenses + splits and applies recorded settlements; `db.getSettlements()` runs a greedy debtor/creditor matching to produce minimal "who pays whom" transfers. Recorded settlements (`settlements` table) are actual logged payments that offset balances.
@@ -81,19 +82,51 @@ Plain numbered SQL files in `migrations/` (`NNNN_name.sql`), applied in filename
 
 `receipts` (migration 0015) owns what belongs to a scan as a whole: its name, its category, and `declared_total_cents` — the total printed on the paper, as the parser read it, so "did this scan reconcile?" stays answerable afterwards. `expenses.receipt_name` is gone; `getExpenses` LEFT JOINs the name back on, so callers still read `receipt_name` on an expense but there is exactly one place it can be written.
 
+**An expense has two timestamps and they are not interchangeable** (migration 0016). `created_at` is when the row was written; `spent_at` is the day the money left, which is the one the user picks and the only one any list, date, chart or sort should read. Before 0016 there was only the first, and it could only ever be "now" — so last night's dinner, entered this morning, was filed under this morning. `src/lib/dates.ts` is the single boundary, exactly as `money.ts` is for cents: `expenseDate` (the day, falling back for pre-0016 rows), `formatDay` to display, `toSpentAt` / `atNoon` to write. A chosen day is stored at **noon UTC** so it cannot slide across midnight in any timezone, and a date left on today is sent as nothing at all, letting the column default stamp the real instant — which is what keeps same-day expenses in insertion order. `getExpenses` orders by `COALESCE(spent_at, created_at) DESC, id DESC`.
+
+**Every foreign key into `members` is `ON DELETE CASCADE`**, so deleting a member does not orphan rows — it deletes the expenses they paid for and shreds the splits of the ones they owed a share of, silently. `removeMember` therefore refuses unless `db.countMemberActivity` returns zero, and that count includes `expenses.paid_by_member_id`, the legacy column migration 0009 could not drop.
+
 **All money is integer cents** (`amount_cents`, migration 0012) — never floats, never a `REAL` column. `src/lib/money.ts` is the only boundary between cents and euros: `formatMoney` / `formatAmount` to display, `parseMoney` to read what a user typed, `toCents` for numeric euros (e.g. an OCR'd price). `receipt-parser.ts` is the one deliberate exception: it parses printed euro strings, and `receipt-scanner.tsx` converts at the hand-off. Splits are computed by `computeSplits` in `splits.ts`, which distributes by largest remainder so the parts always sum to the total exactly — so "does this add up?" is `===`, not an epsilon comparison. Do not reintroduce tolerances.
 
 ## Secrets / env
 
 The D1 binding `DB` is the only entry in `CloudflareEnv` (`src/env.d.ts`); in production it comes from the Worker environment. The app needs no API keys — receipt OCR runs client-side. Never commit real secrets.
 
-## In flight
+## Design system — "Ghiaccio"
 
-A full redesign is agreed and not started — **zero lines written**. The chosen
-direction, its tokens, the screen-by-screen specification and the two decisions
-that block implementation are in [`docs/REDESIGN_HANDOFF.md`](docs/REDESIGN_HANDOFF.md).
-Read it before touching anything visual.
+The redesign is implemented. [`docs/REDESIGN_HANDOFF.md`](docs/REDESIGN_HANDOFF.md)
+is still the specification — read it before changing anything visual — and its
+§6 records what shipped, what was deliberately left open, and why.
+
+Four rules the code depends on:
+
+- **Semantic tokens only.** Every colour comes from a CSS variable in
+  `globals.css`; components never write a hex or a Tailwind palette colour
+  (`emerald-500`, `amber-600`). This is the whole reason the light theme costs
+  nothing to maintain — the dark theme is the design, the light one is the same
+  components resolving different values. Beyond shadcn's set there are
+  `raised` (the one hero surface on a screen), `hairline` (between list rows),
+  `positive` / `negative` (money owed and owing — *not* the accent), and
+  `brand-field` / `brand-border` / `ok-*`.
+- **Rounded surfaces for summaries, bare hairlines for lists.** A group has 82
+  expenses; if every row is a bordered card, seven of them fill a phone and the
+  design collapses. Cards are for the screen's one important number.
+- **Cyan is not "positive".** The accent means "you can touch this". Money that
+  is owed or owing has its own mint and coral.
+- **Every figure is mono.** The `.figure` utility (Geist Mono + tabular-nums)
+  goes on balances, amounts and anything compared down a column.
+- Member colours are never shown raw: `src/lib/tints.ts` mixes them against
+  `--card` / `--foreground` with `color-mix`, so one expression works in both
+  themes and for a colour nobody has invented yet.
+
+The mark is a receipt knocked out of a filled tile. It is defined twice, on
+purpose, and the two must change together: `mark()` in
+`scripts/generate-icons.mjs` (then `npm run icons`) and
+`src/components/brand-mark.tsx`.
+
+**The UI is in Italian.** So are the user-facing strings in `splits.ts` and
+`payers.ts`. Code, comments and this documentation stay in English.
 
 ## UI stack
 
-Tailwind v4, shadcn-style components under `src/components/ui/`, `base-ui` primitives, `lucide-react` icons, `framer-motion`, `recharts` (analytics), `next-themes` (dark mode). The `@/*` alias maps to `src/*`.
+Tailwind v4, shadcn-style components under `src/components/ui/`, `base-ui` primitives, `lucide-react` icons, `framer-motion` (sheets and collapses only — never per-row in a list), `recharts` (analytics), `next-themes` (dark-first, both themes). The `@/*` alias maps to `src/*`.

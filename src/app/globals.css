@@ -9,7 +9,9 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-body);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-display);
+  /* Kept so existing `font-heading` classes resolve; there is no separate
+     display face any more, so it is the body grotesk. */
+  --font-heading: var(--font-body);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -26,6 +28,16 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  /* Ghiaccio adds a few roles shadcn has no name for. */
+  --color-raised: var(--raised);
+  --color-hairline: var(--hairline);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-brand-field: var(--brand-field);
+  --color-brand-border: var(--brand-border);
+  --color-ok-field: var(--ok-field);
+  --color-ok-border: var(--ok-border);
+  --color-ok-foreground: var(--ok-foreground);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -48,75 +60,104 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Terracotta Light — warm Mediterranean palette */
+/* Ghiaccio, chiaro. The dark theme below is the one the direction was designed
+   in; this is its daylight counterpart, and it is not a straight inversion --
+   #5EE6E6 fails contrast on white, so the brand cyan darkens to a teal that
+   carries the same role. Anything that reads a token keeps working in both. */
 :root {
-  --background: oklch(0.975 0.005 70);
-  --foreground: oklch(0.18 0.02 50);
-  --card: oklch(0.995 0.002 80);
-  --card-foreground: oklch(0.18 0.02 50);
-  --popover: oklch(0.995 0.002 80);
-  --popover-foreground: oklch(0.18 0.02 50);
-  --primary: oklch(0.52 0.14 35);
-  --primary-foreground: oklch(0.98 0.005 80);
-  --secondary: oklch(0.945 0.01 75);
-  --secondary-foreground: oklch(0.25 0.02 50);
-  --muted: oklch(0.94 0.008 70);
-  --muted-foreground: oklch(0.5 0.02 55);
-  --accent: oklch(0.94 0.015 75);
-  --accent-foreground: oklch(0.25 0.02 50);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.9 0.01 70);
-  --input: oklch(0.9 0.01 70);
-  --ring: oklch(0.52 0.14 35);
-  --chart-1: oklch(0.52 0.14 35);
-  --chart-2: oklch(0.55 0.1 145);
-  --chart-3: oklch(0.65 0.12 80);
-  --chart-4: oklch(0.55 0.08 230);
-  --chart-5: oklch(0.55 0.1 320);
-  --radius: 0.75rem;
-  --sidebar: oklch(0.97 0.005 70);
-  --sidebar-foreground: oklch(0.18 0.02 50);
-  --sidebar-primary: oklch(0.52 0.14 35);
-  --sidebar-primary-foreground: oklch(0.98 0.005 80);
-  --sidebar-accent: oklch(0.94 0.015 75);
-  --sidebar-accent-foreground: oklch(0.25 0.02 50);
-  --sidebar-border: oklch(0.9 0.01 70);
-  --sidebar-ring: oklch(0.52 0.14 35);
+  --background: #f1f5f9;
+  --foreground: #0c1420;
+  --card: #ffffff;
+  --card-foreground: #0c1420;
+  --raised: #ffffff;
+  --hairline: #e6edf4;
+  --popover: #ffffff;
+  --popover-foreground: #0c1420;
+  /* Dark enough to clear 4.5:1 as text, and specifically on `--brand-field`
+     rather than only on white -- accent text lives on that tinted chip more
+     often than on the page. The first pass (#0C8891) read fine and measured
+     3.8:1 there, which is a fail. */
+  --primary: #0a7480;
+  --primary-foreground: #ffffff;
+  --secondary: #e7eef6;
+  --secondary-foreground: #17202e;
+  --muted: #e7eef6;
+  --muted-foreground: #63718a;
+  --accent: #e7eef6;
+  --accent-foreground: #17202e;
+  --destructive: #c43d2c;
+  --border: #dfe7f0;
+  --input: #dfe7f0;
+  --ring: #0a7480;
+  /* Money has its own colours so the brand stays free to mean "touch this".
+     Both are read at 14px in a list, so both have to clear 4.5:1 on white. */
+  --positive: #0b7a53;
+  --negative: #c43d2c;
+  --brand-field: #e2f6f7;
+  --brand-border: #bce6ea;
+  --ok-field: #eaf7f0;
+  --ok-border: #bfe3d2;
+  --ok-foreground: #12634a;
+  --chart-1: #0a7480;
+  --chart-2: #0b7a53;
+  --chart-3: #b0741f;
+  --chart-4: #6d4490;
+  --chart-5: #1f6180;
+  --radius: 0.875rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0c1420;
+  --sidebar-primary: #0a7480;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e7eef6;
+  --sidebar-accent-foreground: #17202e;
+  --sidebar-border: #dfe7f0;
+  --sidebar-ring: #0a7480;
 }
 
-/* Warm dark — espresso & amber */
+/* Ghiaccio — blue-black ground, cyan accent, layered rounded surfaces. */
 .dark {
-  --background: oklch(0.16 0.015 50);
-  --foreground: oklch(0.92 0.01 70);
-  --card: oklch(0.2 0.015 50);
-  --card-foreground: oklch(0.92 0.01 70);
-  --popover: oklch(0.2 0.015 50);
-  --popover-foreground: oklch(0.92 0.01 70);
-  --primary: oklch(0.65 0.14 40);
-  --primary-foreground: oklch(0.15 0.015 50);
-  --secondary: oklch(0.25 0.015 55);
-  --secondary-foreground: oklch(0.9 0.01 70);
-  --muted: oklch(0.25 0.012 50);
-  --muted-foreground: oklch(0.6 0.02 60);
-  --accent: oklch(0.25 0.02 55);
-  --accent-foreground: oklch(0.9 0.01 70);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(0.3 0.015 55);
-  --input: oklch(0.3 0.015 55);
-  --ring: oklch(0.65 0.14 40);
-  --chart-1: oklch(0.65 0.14 40);
-  --chart-2: oklch(0.6 0.1 145);
-  --chart-3: oklch(0.7 0.12 80);
-  --chart-4: oklch(0.6 0.08 230);
-  --chart-5: oklch(0.6 0.1 320);
-  --sidebar: oklch(0.18 0.015 50);
-  --sidebar-foreground: oklch(0.92 0.01 70);
-  --sidebar-primary: oklch(0.65 0.14 40);
-  --sidebar-primary-foreground: oklch(0.15 0.015 50);
-  --sidebar-accent: oklch(0.25 0.02 55);
-  --sidebar-accent-foreground: oklch(0.9 0.01 70);
-  --sidebar-border: oklch(0.3 0.015 55);
-  --sidebar-ring: oklch(0.65 0.14 40);
+  --background: #0b0e14;
+  --foreground: #dce3ee;
+  --card: #111722;
+  --card-foreground: #dce3ee;
+  /* One step above `card`, for the single hero surface on a screen. */
+  --raised: #141a26;
+  /* Separates rows inside a list, where a full border would be chrome. */
+  --hairline: #151b26;
+  --popover: #141a26;
+  --popover-foreground: #dce3ee;
+  --primary: #5ee6e6;
+  --primary-foreground: #04252b;
+  --secondary: #1a2130;
+  --secondary-foreground: #dce3ee;
+  --muted: #1a2130;
+  --muted-foreground: #7c8798;
+  --accent: #1a2130;
+  --accent-foreground: #dce3ee;
+  --destructive: #ff7a6b;
+  --border: #1e2635;
+  --input: #1e2635;
+  --ring: #5ee6e6;
+  --positive: #6fe3b0;
+  --negative: #ff7a6b;
+  --brand-field: #0f2429;
+  --brand-border: #1e3a3d;
+  --ok-field: #0f2118;
+  --ok-border: #1d3a2a;
+  --ok-foreground: #a8d9c0;
+  --chart-1: #5ee6e6;
+  --chart-2: #6fe3b0;
+  --chart-3: #e0a76b;
+  --chart-4: #c79be0;
+  --chart-5: #6fc3e0;
+  --sidebar: #111722;
+  --sidebar-foreground: #dce3ee;
+  --sidebar-primary: #5ee6e6;
+  --sidebar-primary-foreground: #04252b;
+  --sidebar-accent: #1a2130;
+  --sidebar-accent-foreground: #dce3ee;
+  --sidebar-border: #1e2635;
+  --sidebar-ring: #5ee6e6;
 }
 
 @layer base {
@@ -140,17 +181,12 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
-}
 
-/* Noise texture overlay */
-.noise-bg::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  opacity: 0.03;
-  pointer-events: none;
-  z-index: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 256px 256px;
+  /* Every figure the user compares against another one: balances, amounts,
+     columns. Mono keeps the digits in the same place from row to row. */
+  .figure {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
 }

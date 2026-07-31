@@ -2,14 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, X, Receipt } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { addExpense } from "@/lib/actions";
-import { Button } from "@/components/ui/button";
 import { SplitEditor } from "@/components/split-editor";
 import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, type SplitMode } from "@/lib/splits";
 import { computePayers } from "@/lib/payers";
 import { parseMoney } from "@/lib/money";
+import { toSpentAt, todayInput } from "@/lib/dates";
+import { DateField } from "@/components/date-field";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Member } from "@/lib/db-types";
 
@@ -29,6 +30,9 @@ export function AddExpenseForm({
   const [splitWith, setSplitWith] = useState<Set<number>>(new Set(members.map((m) => m.id)));
   const [splitWeights, setSplitWeights] = useState<Record<number, string>>({});
   const [category, setCategory] = useState<string>("");
+  // Defaults to today, so the common case is still one tap; `toSpentAt` sends
+  // nothing when it is left there, letting the database stamp the real instant.
+  const [day, setDay] = useState(todayInput());
   const [isPending, startTransition] = useTransition();
 
   // The form keeps what the user typed as a string; cents are derived once here
@@ -63,6 +67,8 @@ export function AddExpenseForm({
     formData.set("splitMode", splitMode);
     formData.set("splits", JSON.stringify(splitResult.splits));
     if (category) formData.set("category", category);
+    const spentAt = toSpentAt(day);
+    if (spentAt) formData.set("spentAt", spentAt);
     startTransition(async () => {
       await addExpense(formData);
       reset();
@@ -78,20 +84,19 @@ export function AddExpenseForm({
     setSplitWith(new Set(members.map((m) => m.id)));
     setSplitWeights({});
     setCategory("");
+    setDay(todayInput());
     setOpen(false);
   }
 
   return (
     <>
-      <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.97 }}
+      <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center justify-center gap-2 rounded-2xl bg-primary text-primary-foreground px-4 py-4 font-semibold shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-shadow whitespace-nowrap"
+        className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px"
       >
-        <Plus className="size-5 shrink-0" />
-        <span className="text-sm sm:text-base">Add Expense</span>
-      </motion.button>
+        <Plus className="size-4.5 shrink-0" />
+        Aggiungi spesa
+      </button>
 
       <AnimatePresence>
         {open && (
@@ -99,60 +104,73 @@ export function AddExpenseForm({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4"
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-4"
             onClick={(e) => e.target === e.currentTarget && reset()}
           >
             <motion.div
-              initial={{ opacity: 0, y: 100 }}
+              initial={{ opacity: 0, y: 60 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 100 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+              exit={{ opacity: 0, y: 60 }}
+              transition={{ type: "spring", damping: 28, stiffness: 320 }}
+              className="max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] border border-border bg-raised p-5 pb-8 sm:max-w-md sm:rounded-[22px] sm:pb-5"
             >
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <Receipt className="size-5 text-primary" />
-                  <h2 className="font-heading text-xl font-bold">New Expense</h2>
-                </div>
-                <button onClick={reset} className="text-muted-foreground hover:text-foreground">
-                  <X className="size-5" />
+              {/* Grab handle: this is a sheet on a phone, and the handle is what
+                  says so before anyone tries to drag it. */}
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-border sm:hidden" />
+
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-lg font-medium">Nuova spesa</h2>
+                <button
+                  onClick={reset}
+                  aria-label="Chiudi"
+                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-4.5" />
                 </button>
               </div>
 
               <div className="space-y-5">
-                <input
-                  type="text"
-                  placeholder="What was it for?"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-                />
-
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-muted-foreground">&euro;</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-background pl-10 pr-4 py-3 text-2xl font-heading font-bold tabular-nums placeholder:text-muted-foreground/30 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-                  />
+                {/* The amount is the hero of this sheet, not a field among
+                    fields: it is the one thing every expense has. */}
+                <div className="rounded-2xl border border-border bg-card px-4 py-6 text-center">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span className="text-[28px] leading-none text-foreground">&euro;</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      autoFocus
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      className="figure w-44 border-0 bg-transparent p-0 text-center text-[44px] leading-none font-medium text-primary placeholder:text-muted-foreground/40 focus:outline-none"
+                    />
+                  </div>
                 </div>
 
-                {/* Category */}
+                <input
+                  type="text"
+                  placeholder="Per cosa?"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] placeholder:text-muted-foreground/70 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+
+                <DateField value={day} onChange={setDay} />
+
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground mb-2 block">Category</label>
+                  <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                    Categoria
+                  </label>
                   <div className="flex flex-wrap gap-1.5">
                     {EXPENSE_CATEGORIES.map((cat) => (
                       <button
                         key={cat.id}
                         onClick={() => setCategory(category === cat.id ? "" : cat.id)}
-                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
                           category === cat.id
-                            ? "bg-primary/10 ring-2 ring-primary text-primary"
-                            : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                            ? "bg-brand-field text-primary ring-1 ring-primary"
+                            : "bg-muted text-muted-foreground hover:text-foreground"
                         }`}
                       >
                         <span>{cat.emoji}</span>
@@ -162,7 +180,6 @@ export function AddExpenseForm({
                   </div>
                 </div>
 
-                {/* Paid by */}
                 <PayerEditor
                   members={members}
                   selected={paidBy}
@@ -172,7 +189,6 @@ export function AddExpenseForm({
                   result={payerResult}
                 />
 
-                {/* Split */}
                 <SplitEditor
                   members={members}
                   mode={splitMode}
@@ -184,13 +200,13 @@ export function AddExpenseForm({
                   result={splitResult}
                 />
 
-                <Button
+                <button
                   onClick={handleSubmit}
                   disabled={!description || !amount || !payerResult.valid || !splitResult.valid || isPending}
-                  className="w-full h-12 rounded-xl text-base font-semibold"
+                  className="flex h-12 w-full items-center justify-center rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                 >
-                  {isPending ? "Adding..." : "Add Expense"}
-                </Button>
+                  {isPending ? "Aggiunta…" : "Aggiungi spesa"}
+                </button>
               </div>
             </motion.div>
           </motion.div>

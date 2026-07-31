@@ -2,16 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trash2, Receipt, ChevronDown, Pencil, X, Plus } from "lucide-react";
-import { MemberAvatar, MemberAvatarStack } from "@/components/member-avatar";
+import { Trash2, Receipt, ChevronDown, X, Plus, TriangleAlert } from "lucide-react";
+import { MemberAvatar } from "@/components/member-avatar";
 import { deleteExpense, updateExpense, saveReceipt } from "@/lib/actions";
-import { Button } from "@/components/ui/button";
 import { SplitEditor } from "@/components/split-editor";
 import { PayerEditor } from "@/components/payer-editor";
 import { computeSplits, toNumericWeights, SPLIT_MODES, type SplitMode } from "@/lib/splits";
 import { computePayers } from "@/lib/payers";
 import { formatAmount, formatMoney, parseMoney } from "@/lib/money";
-import { groupExpenses, receiptDate, receiptPayers } from "@/lib/receipts";
+import { groupExpenses, receiptDate, receiptPayers, receiptReconciles } from "@/lib/receipts";
+import { atNoon, expenseDate, formatDay, toDateInput } from "@/lib/dates";
+import { DateField } from "@/components/date-field";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Expense, ExpensePayer, Member } from "@/lib/db-types";
 
@@ -21,7 +22,183 @@ function getCategoryInfo(categoryId: string | null) {
 }
 
 function payerSummary(payers: ExpensePayer[]): string {
-  return payers.map((p) => p.member_name).join(" & ");
+  return payers.map((p) => p.member_name).join(" e ");
+}
+
+// "Giulia · 18 lug", or just the date if the row has no payers at all. Joining
+// unconditionally leaves a leading "· " hanging off a row whose payers never
+// got written -- rare, but it is exactly the kind of row you would be looking
+// at *because* something is wrong with it.
+function rowMeta(payers: ExpensePayer[], iso: string): string {
+  return [payerSummary(payers), formatDay(iso)].filter(Boolean).join(" · ");
+}
+
+// What this row costs *you* -- the figure the design puts under every amount,
+// because €148,50 is not the number anyone is scanning the list for. Null when
+// this browser never said which member it is, or when you are not on the split
+// at all: an explicit "tua: €0,00" on somebody else's dinner is noise.
+function myShareCents(expenses: Expense[], myMemberId: number | null): number | null {
+  if (myMemberId === null) return null;
+  let total = 0;
+  for (const e of expenses) {
+    for (const s of e.splits) if (s.member_id === myMemberId) total += s.amount_cents;
+  }
+  return total > 0 ? total : null;
+}
+
+function MyShare({ cents }: { cents: number | null }) {
+  if (cents === null) return null;
+  return <span className="block text-[11px] text-muted-foreground">tua: {formatMoney(cents)}</span>;
+}
+
+export function ExpenseList({
+  expenses,
+  groupId,
+  members,
+  myMemberId = null,
+}: {
+  expenses: Expense[];
+  groupId: number;
+  members: Member[];
+  myMemberId?: number | null;
+}) {
+  if (expenses.length === 0) {
+    return (
+      <div className="rounded-2xl border border-border bg-raised px-5 py-10 text-center">
+        <p className="font-medium">Ancora nessuna spesa</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Aggiungi la prima spesa, o scansiona uno scontrino.
+        </p>
+      </div>
+    );
+  }
+
+  const entries = groupExpenses(expenses);
+
+  // Hairlines, not cards. Eighty bordered rounded boxes is chrome, not design --
+  // seven of them fill a phone screen and the list stops being readable.
+  return (
+    <div className="divide-y divide-hairline">
+      {entries.map((entry) =>
+        entry.type === "single" ? (
+          <ExpenseItem
+            key={entry.expense.id}
+            expense={entry.expense}
+            groupId={groupId}
+            members={members}
+            myMemberId={myMemberId}
+          />
+        ) : (
+          <ReceiptGroup
+            key={entry.receiptId}
+            expenses={entry.expenses}
+            groupId={groupId}
+            members={members}
+            myMemberId={myMemberId}
+          />
+        )
+      )}
+    </div>
+  );
+}
+
+// The shell both editors sit in: a bottom sheet on a phone, a centred panel on
+// anything wider.
+function Sheet({
+  title,
+  onClose,
+  children,
+  wide = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 60 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 60 }}
+        transition={{ type: "spring", damping: 28, stiffness: 320 }}
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] border border-border bg-raised p-5 pb-8 sm:rounded-[22px] sm:pb-5 ${
+          wide ? "sm:max-w-lg" : "sm:max-w-md"
+        }`}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-lg font-medium">{title}</h2>
+          <button
+            onClick={onClose}
+            aria-label="Chiudi"
+            className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-4.5" />
+          </button>
+        </div>
+        {children}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function CategoryPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+        Categoria
+      </label>
+      <div className="flex flex-wrap gap-1.5">
+        {EXPENSE_CATEGORIES.map((cat) => (
+          <button
+            key={cat.id}
+            type="button"
+            onClick={() => onChange(value === cat.id ? "" : cat.id)}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+              value === cat.id
+                ? "bg-brand-field text-primary ring-1 ring-primary"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span>{cat.emoji}</span>
+            <span>{cat.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PrimaryButton({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-12 w-full items-center justify-center rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
 }
 
 function initialSplitMode(expense: Expense): SplitMode {
@@ -51,40 +228,6 @@ function initialSplitWeights(expense: Expense, mode: SplitMode): Record<number, 
   return weights;
 }
 
-export function ExpenseList({
-  expenses,
-  groupId,
-  members,
-}: {
-  expenses: Expense[];
-  groupId: number;
-  members: Member[];
-}) {
-  if (expenses.length === 0) {
-    return (
-      <div className="text-center py-12 text-muted-foreground">
-        <p className="text-4xl mb-3">📝</p>
-        <p className="font-medium">No expenses yet</p>
-        <p className="text-sm mt-1">Add your first expense to get started</p>
-      </div>
-    );
-  }
-
-  const entries = groupExpenses(expenses);
-
-  return (
-    <div className="space-y-2">
-      {entries.map((entry, i) =>
-        entry.type === "single" ? (
-          <ExpenseItem key={entry.expense.id} expense={entry.expense} groupId={groupId} members={members} index={i} />
-        ) : (
-          <ReceiptGroup key={entry.receiptId} expenses={entry.expenses} groupId={groupId} members={members} index={i} />
-        )
-      )}
-    </div>
-  );
-}
-
 function EditExpenseModal({
   expense,
   groupId,
@@ -111,6 +254,11 @@ function EditExpenseModal({
     initialSplitWeights(expense, initialMode)
   );
   const [category, setCategory] = useState(expense.category || "");
+  // Compared against its starting value on save: an untouched field must not
+  // rewrite the stored timestamp, since that would flatten the time of day the
+  // row was originally written with and reshuffle same-day ordering.
+  const originalDay = toDateInput(expenseDate(expense));
+  const [day, setDay] = useState(originalDay);
   const [isPending, startTransition] = useTransition();
 
   const participantIds = members.filter((m) => splitWith.has(m.id)).map((m) => m.id);
@@ -143,108 +291,71 @@ function EditExpenseModal({
         payerResult.payers,
         splitResult.splits,
         splitMode,
-        category || undefined
+        category || undefined,
+        day !== originalDay ? atNoon(day) : undefined
       );
       onClose();
     });
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 100 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 100 }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
-      >
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <Pencil className="size-5 text-primary" />
-            <h2 className="font-heading text-xl font-bold">Edit Expense</h2>
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            <X className="size-5" />
-          </button>
-        </div>
-
-        <div className="space-y-5">
-          <input
-            type="text"
-            placeholder="What was it for?"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-          />
-
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-muted-foreground">&euro;</span>
+    <Sheet title="Modifica spesa" onClose={onClose}>
+      <div className="space-y-5">
+        {/* The amount is the hero of the sheet, not a field among fields. */}
+        <div className="rounded-2xl border border-border bg-card px-4 py-5 text-center">
+          <div className="flex items-center justify-center gap-1">
+            <span className="text-2xl text-foreground">&euro;</span>
             <input
               type="number"
               step="0.01"
               min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-full rounded-xl border border-border bg-background pl-10 pr-4 py-3 text-2xl font-heading font-bold tabular-nums placeholder:text-muted-foreground/30 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+              className="figure w-40 border-0 bg-transparent p-0 text-center text-[38px] font-medium text-primary focus:outline-none"
             />
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-muted-foreground mb-2 block">Category</label>
-            <div className="flex flex-wrap gap-1.5">
-              {EXPENSE_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setCategory(category === cat.id ? "" : cat.id)}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
-                    category === cat.id
-                      ? "bg-primary/10 ring-2 ring-primary text-primary"
-                      : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  <span>{cat.emoji}</span>
-                  <span>{cat.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <PayerEditor
-            members={members}
-            selected={paidBy}
-            onToggle={togglePayer}
-            amounts={paidAmounts}
-            onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
-            result={payerResult}
-          />
-
-          <SplitEditor
-            members={members}
-            mode={splitMode}
-            onModeChange={setSplitMode}
-            selected={splitWith}
-            onToggle={toggleSplit}
-            weights={splitWeights}
-            onWeightChange={(id, value) => setSplitWeights((w) => ({ ...w, [id]: value }))}
-            result={splitResult}
-          />
-
-          <Button
-            onClick={handleSave}
-            disabled={!description || !amount || !payerResult.valid || !splitResult.valid || isPending}
-            className="w-full h-12 rounded-xl text-base font-semibold"
-          >
-            {isPending ? "Saving..." : "Save Changes"}
-          </Button>
         </div>
-      </motion.div>
-    </motion.div>
+
+        <input
+          type="text"
+          placeholder="Per cosa?"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] placeholder:text-muted-foreground/70 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+
+        <DateField value={day} onChange={setDay} />
+
+        <CategoryPicker value={category} onChange={setCategory} />
+
+        <PayerEditor
+          members={members}
+          selected={paidBy}
+          onToggle={togglePayer}
+          amounts={paidAmounts}
+          onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
+          result={payerResult}
+        />
+
+        <SplitEditor
+          members={members}
+          mode={splitMode}
+          onModeChange={setSplitMode}
+          selected={splitWith}
+          onToggle={toggleSplit}
+          weights={splitWeights}
+          onWeightChange={(id, value) => setSplitWeights((w) => ({ ...w, [id]: value }))}
+          result={splitResult}
+        />
+
+        <PrimaryButton
+          onClick={handleSave}
+          disabled={!description || !amount || !payerResult.valid || !splitResult.valid || isPending}
+        >
+          {isPending ? "Salvataggio…" : "Salva"}
+        </PrimaryButton>
+      </div>
+    </Sheet>
   );
 }
 
@@ -274,6 +385,10 @@ function EditReceiptModal({
   const [category, setCategory] = useState<string>(
     expenses.find((e) => e.category)?.category ?? ""
   );
+  // One date for the whole shop, like the category: the receipt happened on one
+  // day, and its lines are an implementation detail of how it is stored.
+  const originalDay = toDateInput(receiptDate(expenses));
+  const [day, setDay] = useState(originalDay);
   const receiptPayerTotals = new Map<number, number>();
   for (const e of expenses) {
     for (const p of e.payers) {
@@ -323,6 +438,7 @@ function EditReceiptModal({
 
   // Lines keep the user's raw text; the running total is cents.
   const total = lines.reduce((s, l) => s + (parseMoney(l.price) ?? 0), 0);
+  const declared = expenses[0].receipt_declared_total_cents;
   const payerResult = computePayers(total, Array.from(paidBy), paidAmounts);
   const canSave =
     payerResult.valid &&
@@ -351,167 +467,158 @@ function EditReceiptModal({
           category: category || undefined,
         })),
         originalIds,
-        category || undefined
+        category || undefined,
+        day !== originalDay ? atNoon(day) : undefined
       );
       onClose();
     });
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 100 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 100 }}
-        transition={{ type: "spring", damping: 25, stiffness: 300 }}
-        className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
-      >
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <Receipt className="size-5 text-primary" />
-            <h2 className="font-heading text-xl font-bold">Edit Receipt</h2>
+    <Sheet title="Modifica scontrino" onClose={onClose} wide>
+      <div className="space-y-5">
+        {/* Does this add up? The parser stored the printed total, so the answer
+            survives the scan and can still be shown while editing -- and it
+            updates live as lines are corrected. */}
+        {declared !== null && <ReconcileStrip total={total} declared={declared} />}
+
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+            Nome dello scontrino
+          </label>
+          <input
+            type="text"
+            value={receiptName}
+            onChange={(e) => setReceiptName(e.target.value)}
+            placeholder="es. Supermercato, Cena…"
+            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+
+        <DateField value={day} onChange={setDay} />
+
+        {/* Category, applied to every line on save. This is also how the
+            receipts scanned before the scanner asked for one get fixed. */}
+        <CategoryPicker value={category} onChange={setCategory} />
+
+        <PayerEditor
+          members={members}
+          selected={paidBy}
+          onToggle={togglePayer}
+          amounts={paidAmounts}
+          onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
+          result={payerResult}
+        />
+
+        <div>
+          <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+            Voci ({lines.length})
+          </label>
+          <div className="space-y-3">
+            {lines.map((line, idx) => (
+              <div key={line.id ?? `new-${idx}`} className="space-y-2.5 rounded-xl border border-border bg-card p-3">
+                <div className="flex items-start gap-2">
+                  <input
+                    type="text"
+                    value={line.name}
+                    placeholder="Voce"
+                    onChange={(e) => updateLine(idx, "name", e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  <div className="relative shrink-0">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                      &euro;
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={line.price}
+                      placeholder="0.00"
+                      onChange={(e) => updateLine(idx, "price", e.target.value)}
+                      className="figure w-24 rounded-lg border border-border bg-background py-2 pl-7 pr-2 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <button
+                    onClick={() => removeLine(idx)}
+                    aria-label="Togli la voce"
+                    className="shrink-0 p-1.5 text-muted-foreground transition-colors hover:text-destructive"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+
+                {/* Split selection per item — single scrollable row on mobile */}
+                <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 py-0.5 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+                  {members.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => toggleLineSplit(idx, m.id)}
+                      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs transition-colors ${
+                        line.splitMemberIds.has(m.id)
+                          ? "bg-brand-field text-primary ring-1 ring-primary"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      <MemberAvatar name={m.name} color={m.color} size="sm" />
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-            <X className="size-5" />
+
+          <button
+            onClick={addLine}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+          >
+            <Plus className="size-4" />
+            Aggiungi voce
           </button>
         </div>
 
-        <div className="space-y-5">
-          {/* Receipt name */}
-          <div>
-            <label className="text-sm font-medium text-muted-foreground mb-2 block">Receipt name</label>
-            <input
-              type="text"
-              value={receiptName}
-              onChange={(e) => setReceiptName(e.target.value)}
-              placeholder="e.g. Grocery store, Dinner..."
-              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-            />
-          </div>
-
-          {/* Category, applied to every line on save. This is also how the
-              receipts scanned before the scanner asked for one get fixed. */}
-          <div>
-            <label className="text-sm font-medium text-muted-foreground mb-2 block">Category</label>
-            <div className="flex flex-wrap gap-1.5">
-              {EXPENSE_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setCategory(category === cat.id ? "" : cat.id)}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
-                    category === cat.id
-                      ? "bg-primary/10 ring-2 ring-primary text-primary"
-                      : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  <span>{cat.emoji}</span>
-                  <span>{cat.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Paid by */}
-          <PayerEditor
-            members={members}
-            selected={paidBy}
-            onToggle={togglePayer}
-            amounts={paidAmounts}
-            onAmountChange={(id, value) => setPaidAmounts((a) => ({ ...a, [id]: value }))}
-            result={payerResult}
-          />
-
-          {/* Items */}
-          <div>
-            <label className="text-sm font-medium text-muted-foreground mb-2 block">
-              Items ({lines.length})
-            </label>
-            <div className="space-y-3">
-              {lines.map((line, idx) => (
-                <div key={line.id ?? `new-${idx}`} className="rounded-xl border border-border bg-background p-4 space-y-3">
-                  <div className="flex items-start gap-2">
-                    <input
-                      type="text"
-                      value={line.name}
-                      placeholder="Item"
-                      onChange={(e) => updateLine(idx, "name", e.target.value)}
-                      className="flex-1 min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-                    />
-                    <div className="relative shrink-0">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">
-                        &euro;
-                      </span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={line.price}
-                        placeholder="0.00"
-                        onChange={(e) => updateLine(idx, "price", e.target.value)}
-                        className="w-24 rounded-lg border border-border bg-card pl-7 pr-2 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-                      />
-                    </div>
-                    <button
-                      onClick={() => removeLine(idx)}
-                      className="text-muted-foreground hover:text-destructive p-1.5 shrink-0"
-                    >
-                      <X className="size-4" />
-                    </button>
-                  </div>
-
-                  {/* Split selection per item — single scrollable row on mobile */}
-                  <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:mx-0 sm:px-0">
-                    {members.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => toggleLineSplit(idx, m.id)}
-                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all shrink-0 whitespace-nowrap ${
-                          line.splitMemberIds.has(m.id)
-                            ? "bg-primary/10 ring-1 ring-primary text-primary"
-                            : "bg-muted/50 text-muted-foreground"
-                        }`}
-                      >
-                        <MemberAvatar name={m.name} color={m.color} size="sm" />
-                        {m.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              onClick={addLine}
-              className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-sm font-medium text-muted-foreground hover:border-primary/50 hover:text-foreground transition-all"
-            >
-              <Plus className="size-4" />
-              Add item
-            </button>
-          </div>
-
-          {/* Total */}
-          <div className="flex items-center justify-between pt-2 border-t border-border">
-            <span className="text-sm font-medium text-muted-foreground">Total</span>
-            <span className="text-lg font-heading font-bold tabular-nums">{formatMoney(total)}</span>
-          </div>
-
-          <Button
-            onClick={handleSave}
-            disabled={!canSave || isPending}
-            className="w-full h-12 rounded-xl text-base font-semibold"
-          >
-            {isPending ? "Saving..." : "Save Changes"}
-          </Button>
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <span className="text-sm text-muted-foreground">Totale</span>
+          <span className="figure text-lg font-medium">{formatMoney(total)}</span>
         </div>
-      </motion.div>
-    </motion.div>
+
+        <PrimaryButton onClick={handleSave} disabled={!canSave || isPending}>
+          {isPending ? "Salvataggio…" : "Salva"}
+        </PrimaryButton>
+      </div>
+    </Sheet>
+  );
+}
+
+// The cleverest thing in the codebase, made visible. The parser reads the total
+// printed on the paper and checks the extracted items against it; that check
+// used to be a line of small text that scrolled past. Cents are exact, so this
+// is `===`, not an epsilon.
+function ReconcileStrip({ total, declared }: { total: number; declared: number }) {
+  const ok = receiptReconciles(total, declared);
+  const diff = total - declared;
+  return (
+    <div
+      className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-3 text-sm ${
+        ok
+          ? "border-ok-border bg-ok-field text-ok-foreground"
+          : "border-negative/30 bg-negative/10 text-negative"
+      }`}
+    >
+      {ok ? <Receipt className="size-4 shrink-0" /> : <TriangleAlert className="size-4 shrink-0" />}
+      <span className="min-w-0">
+        {ok ? (
+          <>Le voci tornano con il totale stampato ({formatMoney(declared)})</>
+        ) : (
+          <>
+            Le voci non tornano: {formatMoney(total)} contro {formatMoney(declared)} stampati (
+            {diff > 0 ? "+" : "−"}
+            {formatMoney(Math.abs(diff))})
+          </>
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -519,71 +626,53 @@ function ReceiptGroup({
   expenses,
   groupId,
   members,
-  index,
+  myMemberId,
 }: {
   expenses: Expense[];
   groupId: number;
   members: Member[];
-  index: number;
+  myMemberId: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState(false);
   const total = expenses.reduce((s, e) => s + e.amount_cents, 0);
-  const payerLabel = payerSummary(receiptPayers(expenses));
-  const receiptName = expenses[0].receipt_name;
-  const date = new Date(receiptDate(expenses) + "Z");
-  const formattedDate = date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
-
-  const displayName = receiptName || "Receipt";
-
-  function openEditor(e: React.MouseEvent) {
-    e.stopPropagation();
-    setEditingReceipt(true);
-  }
+  const payers = receiptPayers(expenses);
+  const declared = expenses[0].receipt_declared_total_cents;
+  // A scan that never added up stays flagged in the list, not just at the
+  // moment it was reviewed -- that is what storing the declared total bought.
+  const misread = declared !== null && !receiptReconciles(total, declared);
+  const displayName = expenses[0].receipt_name || "Scontrino";
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.05 }}
-      className="rounded-xl border border-border bg-card overflow-hidden"
-    >
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent/30 transition-colors"
-      >
-        <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-          <Receipt className="size-4 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0 text-left">
-          <p className="font-medium text-sm truncate flex items-center gap-1.5">
-            {displayName}
-            <span className="text-muted-foreground font-normal">
-              &middot; {expenses.length} {expenses.length === 1 ? "item" : "items"}
+    <>
+      <div className="flex items-center gap-3 py-3">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <span className="flex size-[29px] shrink-0 items-center justify-center rounded-[9px] border border-brand-border bg-brand-field text-primary">
+            <Receipt className="size-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 truncate text-[14px]">
+              {displayName}
+              {misread && <TriangleAlert className="size-3.5 shrink-0 text-negative" />}
             </span>
-            <span
-              onClick={openEditor}
-              className="inline-flex p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground"
-            >
-              <Pencil className="size-3" />
+            <span className="block truncate text-xs text-muted-foreground">
+              {[payerSummary(payers), `${expenses.length} voci`, formatDay(receiptDate(expenses))]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {payerLabel} paid &middot; {formattedDate}
-          </p>
-        </div>
-        <div className="text-right shrink-0 mr-1">
-          <p className="font-heading font-bold tabular-nums">{formatMoney(total)}</p>
-        </div>
-        <ChevronDown
-          className={`size-4 text-muted-foreground transition-transform shrink-0 ${
-            open ? "rotate-180" : ""
-          }`}
-        />
-      </button>
+          </span>
+          <span className="shrink-0 text-right">
+            <span className="figure block text-[15px]">{formatMoney(total)}</span>
+            <MyShare cents={myShareCents(expenses, myMemberId)} />
+          </span>
+          <ChevronDown
+            className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
 
       <AnimatePresence initial={false}>
         {open && (
@@ -591,19 +680,24 @@ function ReceiptGroup({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div className="border-t border-border px-3 py-2 space-y-1">
+            <div className="mb-3 rounded-xl border border-border bg-card p-1.5">
               {expenses.map((expense) => (
-                <ReceiptItemRow key={expense.id} expense={expense} groupId={groupId} members={members} />
+                <ReceiptItemRow
+                  key={expense.id}
+                  expense={expense}
+                  groupId={groupId}
+                  members={members}
+                  myMemberId={myMemberId}
+                />
               ))}
               <button
                 onClick={() => setEditingReceipt(true)}
-                className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent/30 transition-all"
+                className="w-full rounded-lg py-2 text-xs text-primary transition-colors hover:bg-muted"
               >
-                <Pencil className="size-3" />
-                Edit receipt
+                Modifica lo scontrino
               </button>
             </div>
           </motion.div>
@@ -620,7 +714,7 @@ function ReceiptGroup({
           />
         )}
       </AnimatePresence>
-    </motion.div>
+    </>
   );
 }
 
@@ -628,39 +722,40 @@ function ReceiptItemRow({
   expense,
   groupId,
   members,
+  myMemberId,
 }: {
   expense: Expense;
   groupId: number;
   members: Member[];
+  myMemberId: number | null;
 }) {
   const [isPending, startTransition] = useTransition();
   const [editingExpense, setEditingExpense] = useState(false);
 
   return (
     <>
-      <div className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent/20 transition-colors">
-        <button
-          onClick={() => setEditingExpense(true)}
-          className="flex-1 min-w-0 text-left"
-        >
-          <p className="text-sm truncate">{expense.description}</p>
-          <p className="text-[11px] text-muted-foreground">
-            {expense.splits.length} {expense.splits.length === 1 ? "person" : "people"}
-          </p>
+      <div className="group flex items-center gap-3 rounded-lg px-2.5 py-2 transition-colors hover:bg-muted">
+        <button onClick={() => setEditingExpense(true)} className="min-w-0 flex-1 text-left">
+          <span className="block truncate text-sm">{expense.description}</span>
+          <span className="block text-[11px] text-muted-foreground">
+            {expense.splits.length === 1 ? "1 persona" : `${expense.splits.length} persone`}
+          </span>
         </button>
-        <p className="font-medium text-sm tabular-nums shrink-0">
-          {formatMoney(expense.amount_cents)}
-        </p>
+        <span className="shrink-0 text-right">
+          <span className="figure block text-sm">{formatMoney(expense.amount_cents)}</span>
+          <MyShare cents={myShareCents([expense], myMemberId)} />
+        </span>
         <button
           onClick={() => {
-            if (confirm("Delete this item?")) {
+            if (confirm("Eliminare questa voce?")) {
               startTransition(() => deleteExpense(expense.id, groupId));
             }
           }}
           disabled={isPending}
-          className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all shrink-0"
+          aria-label="Elimina la voce"
+          className="shrink-0 rounded-lg p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
         >
-          <Trash2 className="size-3" />
+          <Trash2 className="size-3.5" />
         </button>
       </div>
       <AnimatePresence>
@@ -681,65 +776,57 @@ function ExpenseItem({
   expense,
   groupId,
   members,
-  index,
+  myMemberId,
 }: {
   expense: Expense;
   groupId: number;
   members: Member[];
-  index: number;
+  myMemberId: number | null;
 }) {
   const [isPending, startTransition] = useTransition();
   const [editingExpense, setEditingExpense] = useState(false);
-  const date = new Date(expense.created_at + "Z");
-  const formattedDate = date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
-
   const cat = getCategoryInfo(expense.category);
+  const lead = expense.payers[0];
 
   return (
     <>
-      <motion.div
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: index * 0.05 }}
-        className="group flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:bg-accent/30 transition-colors cursor-pointer"
-        onClick={() => setEditingExpense(true)}
-      >
-        <MemberAvatarStack members={expense.payers.map((p) => ({ name: p.member_name, color: p.member_color }))} />
-        <div className="flex-1 min-w-0">
-          <p className="font-medium text-sm truncate flex items-center gap-1.5">
-            {expense.description}
-            {cat && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground shrink-0">
-                {cat.emoji} {cat.label}
-              </span>
-            )}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {payerSummary(expense.payers)} paid &middot; {formattedDate}
-          </p>
-        </div>
-        <div className="text-right shrink-0">
-          <p className="font-heading font-bold tabular-nums">{formatMoney(expense.amount_cents)}</p>
-          <p className="text-[11px] text-muted-foreground">
-            {expense.splits.length} {expense.splits.length === 1 ? "person" : "people"}
-          </p>
-        </div>
+      <div className="group flex items-center gap-3 py-3">
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (confirm("Delete this expense?")) {
+          onClick={() => setEditingExpense(true)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          {lead ? (
+            <MemberAvatar name={lead.member_name} color={lead.member_color} />
+          ) : (
+            <span className="size-[29px] shrink-0 rounded-[9px] bg-muted" />
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 truncate text-[14px]">
+              {expense.description}
+              {cat && <span className="shrink-0 text-[11px]">{cat.emoji}</span>}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {rowMeta(expense.payers, expenseDate(expense))}
+            </span>
+          </span>
+          <span className="shrink-0 text-right">
+            <span className="figure block text-[15px]">{formatMoney(expense.amount_cents)}</span>
+            <MyShare cents={myShareCents([expense], myMemberId)} />
+          </span>
+        </button>
+        <button
+          onClick={() => {
+            if (confirm("Eliminare questa spesa?")) {
               startTransition(() => deleteExpense(expense.id, groupId));
             }
           }}
           disabled={isPending}
-          className="sm:opacity-0 sm:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all shrink-0"
+          aria-label="Elimina la spesa"
+          className="shrink-0 rounded-lg p-1.5 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
         >
           <Trash2 className="size-3.5" />
         </button>
-      </motion.div>
+      </div>
       <AnimatePresence>
         {editingExpense && (
           <EditExpenseModal

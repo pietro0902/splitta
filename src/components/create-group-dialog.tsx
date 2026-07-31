@@ -3,11 +3,9 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, X, Users, Sparkles, UserCheck } from "lucide-react";
+import { Plus, X, UserCheck } from "lucide-react";
 import { createGroup } from "@/lib/actions";
-import { Button } from "@/components/ui/button";
-
-const EMOJIS = ["👥", "🏠", "✈️", "🍕", "🎉", "💼", "🏖️", "🎵", "🚗", "🛒"];
+import { GROUP_EMOJIS } from "@/lib/db-types";
 
 export function CreateGroupDialog() {
   const router = useRouter();
@@ -65,20 +63,13 @@ export function CreateGroupDialog() {
 
   return (
     <>
-      <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+      <button
         onClick={() => setOpen(true)}
-        className="group relative flex items-center gap-3 rounded-2xl border-2 border-dashed border-border px-6 py-5 text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground hover:bg-accent/50"
+        className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px"
       >
-        <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary/20">
-          <Plus className="size-5" />
-        </div>
-        <div className="text-left">
-          <p className="font-heading text-base font-semibold">New Group</p>
-          <p className="text-sm opacity-70">Start splitting expenses</p>
-        </div>
-      </motion.button>
+        <Plus className="size-4.5" />
+        Nuovo gruppo
+      </button>
 
       <AnimatePresence>
         {open && (
@@ -86,37 +77,37 @@ export function CreateGroupDialog() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
             onClick={(e) => e.target === e.currentTarget && reset()}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="w-full max-w-md rounded-3xl bg-card border border-border p-6 shadow-2xl"
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 40 }}
+              transition={{ type: "spring", damping: 28, stiffness: 320 }}
+              className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-[22px] border border-border bg-raised p-5 pb-8 sm:rounded-[22px] sm:pb-5"
             >
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="size-5 text-primary" />
-                  <h2 className="font-heading text-xl font-bold">Create Group</h2>
-                </div>
-                <button onClick={reset} className="text-muted-foreground hover:text-foreground">
-                  <X className="size-5" />
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-lg font-medium">Nuovo gruppo</h2>
+                <button
+                  onClick={reset}
+                  aria-label="Chiudi"
+                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-4.5" />
                 </button>
               </div>
 
               <div className="space-y-5">
-                {/* Emoji picker */}
-                <div className="flex gap-2 flex-wrap">
-                  {EMOJIS.map((e) => (
+                <div className="flex flex-wrap gap-2">
+                  {GROUP_EMOJIS.map((e) => (
                     <button
                       key={e}
                       onClick={() => setEmoji(e)}
-                      className={`size-10 rounded-xl text-lg flex items-center justify-center transition-all ${
+                      className={`flex size-10 items-center justify-center rounded-xl text-lg transition-colors ${
                         emoji === e
-                          ? "bg-primary/15 ring-2 ring-primary scale-110"
-                          : "bg-muted hover:bg-accent"
+                          ? "bg-brand-field ring-1 ring-primary"
+                          : "bg-muted hover:bg-secondary"
                       }`}
                     >
                       {e}
@@ -124,63 +115,56 @@ export function CreateGroupDialog() {
                   ))}
                 </div>
 
-                {/* Group name */}
                 <input
                   type="text"
-                  placeholder="Group name..."
+                  placeholder="Nome del gruppo…"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-background px-4 py-3 font-heading text-lg font-semibold placeholder:text-muted-foreground/50 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] placeholder:text-muted-foreground/70 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
                 />
 
-                {/* Members */}
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
-                    <Users className="size-3.5" />
-                    Members ({members.length})
+                  <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                    Membri ({members.length})
                   </label>
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Add a member..."
+                      placeholder="Aggiungi una persona…"
                       value={memberInput}
                       onChange={(e) => setMemberInput(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addMember())}
-                      className="flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                      className="flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground/70 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
-                    <Button onClick={addMember} size="lg" variant="secondary">
-                      <Plus className="size-4" />
-                    </Button>
+                    <button
+                      onClick={addMember}
+                      aria-label="Aggiungi"
+                      className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border text-primary transition-colors hover:bg-muted"
+                    >
+                      <Plus className="size-4.5" />
+                    </button>
                   </div>
-                  <AnimatePresence>
-                    {members.length > 0 && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        className="flex flex-wrap gap-2 mt-3"
-                      >
-                        {members.map((m) => (
-                          <motion.span
-                            key={m}
-                            initial={{ scale: 0, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0, opacity: 0 }}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary"
+                  {members.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {members.map((m) => (
+                        <span
+                          key={m}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-brand-border bg-brand-field px-3 py-1.5 text-sm text-primary"
+                        >
+                          {m}
+                          <button
+                            onClick={() => removeMember(m)}
+                            aria-label={`Togli ${m}`}
+                            className="transition-colors hover:text-destructive"
                           >
-                            {m}
-                            <button
-                              onClick={() => removeMember(m)}
-                              className="hover:text-destructive transition-colors"
-                            >
-                              <X className="size-3" />
-                            </button>
-                          </motion.span>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                  {members.length < 2 && members.length > 0 && (
-                    <p className="text-xs text-muted-foreground mt-2">Add at least 2 members</p>
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {members.length > 0 && members.length < 2 && (
+                    <p className="mt-2 text-xs text-muted-foreground">Servono almeno 2 persone</p>
                   )}
                 </div>
 
@@ -189,9 +173,9 @@ export function CreateGroupDialog() {
                     "you owe / you are owed" figure depends on that answer. */}
                 {members.length > 0 && (
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
+                    <label className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-[0.08em] text-muted-foreground">
                       <UserCheck className="size-3.5" />
-                      And which one is you?
+                      E tu chi sei?
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {members.map((m, i) => (
@@ -199,10 +183,10 @@ export function CreateGroupDialog() {
                           key={m}
                           type="button"
                           onClick={() => setMeIndex(meIndex === i ? null : i)}
-                          className={`rounded-full px-3 py-1.5 text-sm font-medium transition-all ${
+                          className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
                             meIndex === i
-                              ? "bg-primary/10 ring-2 ring-primary text-primary"
-                              : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                              ? "bg-brand-field text-primary ring-1 ring-primary"
+                              : "bg-muted text-muted-foreground hover:text-foreground"
                           }`}
                         >
                           {m}
@@ -212,13 +196,13 @@ export function CreateGroupDialog() {
                   </div>
                 )}
 
-                <Button
+                <button
                   onClick={handleSubmit}
                   disabled={!name.trim() || members.length < 2 || isPending}
-                  className="w-full h-12 rounded-xl text-base font-semibold"
+                  className="flex h-12 w-full items-center justify-center rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                 >
-                  {isPending ? "Creating..." : "Create Group"}
-                </Button>
+                  {isPending ? "Creazione…" : "Crea gruppo"}
+                </button>
               </div>
             </motion.div>
           </motion.div>

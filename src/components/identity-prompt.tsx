@@ -1,8 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { motion } from "framer-motion";
-import { UserCheck } from "lucide-react";
 import { claimMemberIdentity } from "@/lib/actions";
 import { MemberAvatar } from "@/components/member-avatar";
 import type { Member } from "@/lib/db-types";
@@ -24,17 +22,10 @@ export function IdentityPrompt({
   const [isPending, startTransition] = useTransition();
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mb-5 rounded-2xl border border-border bg-card p-4"
-    >
-      <p className="text-sm font-medium flex items-center gap-1.5">
-        <UserCheck className="size-4 text-primary" />
-        Which one is you?
-      </p>
-      <p className="text-xs text-muted-foreground mt-1 mb-3">
-        Tell us and this group can show what you owe and what you are owed.
+    <div className="mb-4 rounded-2xl border border-brand-border bg-brand-field p-4">
+      <p className="text-sm font-medium">Chi sei, in questo gruppo?</p>
+      <p className="mb-3 mt-1 text-xs text-muted-foreground">
+        Dillo e il gruppo può mostrarti quanto devi e quanto ti devono.
       </p>
       <div className="flex flex-wrap gap-2">
         {members.map((m) => (
@@ -42,13 +33,13 @@ export function IdentityPrompt({
             key={m.id}
             onClick={() => startTransition(() => void claimMemberIdentity(groupId, m.id))}
             disabled={isPending}
-            className="inline-flex items-center gap-2 rounded-full bg-muted/50 hover:bg-primary/10 hover:ring-2 hover:ring-primary pl-1.5 pr-3 py-1.5 text-sm font-medium transition-all disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-background py-1.5 pl-1.5 pr-3 text-sm transition-colors hover:border-primary disabled:opacity-50"
           >
             <MemberAvatar name={m.name} color={m.color} size="sm" />
             {m.name}
           </button>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 }

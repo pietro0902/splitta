@@ -13,9 +13,14 @@
 
 export const CURRENCY = "€";
 
-// "€12.34". The display form everywhere an amount is shown.
+// "€12,34". The display form everywhere an amount is shown.
+//
+// Comma, because the interface is Italian and "€89.63" reads as a typo to
+// everyone using this app. Deliberately only here: `formatAmount` below feeds
+// `<input type="number">`, whose value attribute must be a dot-decimal or the
+// browser silently treats the field as empty.
 export function formatMoney(cents: number): string {
-  return CURRENCY + formatAmount(cents);
+  return CURRENCY + formatAmount(cents).replace(".", ",");
 }
 
 // "12.34" -- no symbol, for form fields and chart tick labels.

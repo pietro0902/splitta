@@ -21,7 +21,14 @@ export type ExpenseRow = {
   // the columns as of migration 0012. Euros exist only in what the user reads
   // and types; src/lib/money.ts is the only place the two meet.
   amount_cents: number;
+  // When the row was written. Insertion order, and the tie-breaker between two
+  // expenses on the same day.
   created_at: string;
+  // The day the money was spent, which is the one the user picks and the one
+  // every list, date and chart should read (migration 0016). Null only for a
+  // row older than that migration; `expenseDate` in src/lib/dates.ts is the
+  // single place that falls back.
+  spent_at: string | null;
   receipt_id: string | null;
   // Joined in from `receipts`, not stored on the row (migration 0015).
   receipt_name: string | null;
@@ -68,6 +75,11 @@ export type GroupWithDetails = Group & {
 export type GroupSummary = Group & {
   members: Member[];
   totalExpensesCents: number;
+  // Which member this browser said it is, and that member's position in the
+  // group. Both null when the question was never answered -- null is "unknown",
+  // and is deliberately not the same as a balance of zero, which is "settled".
+  myMemberId: number | null;
+  myBalanceCents: number | null;
 };
 
 export type SettlementRecord = {
@@ -94,6 +106,11 @@ export type ShoppingItem = {
   added_by_name?: string;
   added_by_color?: string;
 };
+
+// Offered when a group is created and when it is renamed, so it lives here
+// rather than inside either screen: two lists that drift apart would let a
+// group hold an emoji its own settings sheet cannot show as selected.
+export const GROUP_EMOJIS = ["👥", "🏠", "✈️", "🍕", "🎉", "💼", "🏖️", "🎵", "🚗", "🛒"] as const;
 
 export const EXPENSE_CATEGORIES = [
   { id: "food", label: "Food", emoji: "🍕" },

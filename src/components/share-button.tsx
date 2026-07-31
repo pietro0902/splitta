@@ -31,7 +31,7 @@ export function ShareButton({
     const url = `${window.location.origin}/invite/${t}`;
     if (navigator.share) {
       try {
-        await navigator.share({ title: "Join my Splitta group", url });
+        await navigator.share({ title: "Entra nel mio gruppo su Splitta", url });
       } catch {
         // user cancelled share dialog
       }
@@ -46,13 +46,10 @@ export function ShareButton({
     <button
       onClick={handleClick}
       disabled={isLoading}
-      className="flex size-9 items-center justify-center rounded-xl bg-card border border-border hover:bg-accent transition-colors"
+      aria-label="Condividi il gruppo"
+      className="flex size-9 items-center justify-center rounded-xl border border-border text-primary transition-colors hover:bg-muted"
     >
-      {copied ? (
-        <Check className="size-4 text-primary" />
-      ) : (
-        <Share2 className="size-4" />
-      )}
+      {copied ? <Check className="size-4" /> : <Share2 className="size-4" />}
     </button>
   );
 }

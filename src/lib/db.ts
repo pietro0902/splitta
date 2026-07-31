@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import type { Group, Member, ExpenseRow, ExpenseSplit, ExpensePayer, Expense, Settlement, SettlementRecord, ShoppingItem } from "./db-types";
+import type { Group, Member, ExpenseRow, ExpenseSplit, ExpensePayer, Settlement, SettlementRecord, ShoppingItem } from "./db-types";
 import type { SplitInput, SplitMode } from "./splits";
 import type { PayerInput } from "./payers";
 
@@ -26,19 +26,42 @@ export const db = {
   // Two round trips regardless of how many groups come back, instead of the
   // 1 + 2N this did before: the totals are a correlated subquery, and the
   // members of every matched group are fetched together.
+  //
+  // `myBalanceCents` is the figure the homepage leads with, and it is the same
+  // arithmetic getBalances does for a whole group -- what I paid, minus what I
+  // owe, plus what I have settled -- but restricted to the one member this
+  // client said it is and evaluated for every group at once. Doing it by
+  // calling getBalances per group would be 3N queries to render a list.
+  //
+  // A NULL `ga.member_id` (this browser never answered "who are you?") makes
+  // every subquery sum nothing, so the raw figure would read as a tidy zero.
+  // That is a lie -- zero means settled -- so it is mapped to null below and
+  // the UI says nothing rather than something wrong.
   async getGroups(clientId: string) {
     const d1 = await getDb();
     const { results: groups } = await d1
       .prepare(
         `SELECT g.*,
-                COALESCE((SELECT SUM(e.amount_cents) FROM expenses e WHERE e.group_id = g.id), 0) AS totalExpensesCents
+                ga.member_id AS my_member_id,
+                COALESCE((SELECT SUM(e.amount_cents) FROM expenses e WHERE e.group_id = g.id), 0) AS totalExpensesCents,
+                COALESCE((SELECT SUM(ep.amount_cents) FROM expense_payers ep
+                            JOIN expenses e ON e.id = ep.expense_id
+                           WHERE e.group_id = g.id AND ep.member_id = ga.member_id), 0)
+              - COALESCE((SELECT SUM(es.amount_cents) FROM expense_splits es
+                            JOIN expenses e ON e.id = es.expense_id
+                           WHERE e.group_id = g.id AND es.member_id = ga.member_id), 0)
+              + COALESCE((SELECT SUM(s.amount_cents) FROM settlements s
+                           WHERE s.group_id = g.id AND s.from_member_id = ga.member_id), 0)
+              - COALESCE((SELECT SUM(s.amount_cents) FROM settlements s
+                           WHERE s.group_id = g.id AND s.to_member_id = ga.member_id), 0)
+                AS myBalanceCents
          FROM groups g
          JOIN group_access ga ON ga.group_id = g.id
          WHERE ga.client_id = ?
          ORDER BY g.created_at DESC`
       )
       .bind(clientId)
-      .all<Group & { totalExpensesCents: number }>();
+      .all<Group & { totalExpensesCents: number; myBalanceCents: number; my_member_id: number | null }>();
 
     if (groups.length === 0) return [];
 
@@ -55,7 +78,12 @@ export const db = {
       byGroup.set(m.group_id, arr);
     }
 
-    return groups.map((g) => ({ ...g, members: byGroup.get(g.id) || [] }));
+    return groups.map(({ my_member_id, ...g }) => ({
+      ...g,
+      members: byGroup.get(g.id) || [],
+      myMemberId: my_member_id,
+      myBalanceCents: my_member_id === null ? null : g.myBalanceCents,
+    }));
   },
 
   // --- access control -------------------------------------------------------
@@ -198,6 +226,65 @@ export const db = {
     await d1.prepare("DELETE FROM groups WHERE id = ?").bind(id).run();
   },
 
+  async updateGroup(id: number, name: string, emoji: string) {
+    const d1 = await getDb();
+    await d1
+      .prepare("UPDATE groups SET name = ?, emoji = ? WHERE id = ?")
+      .bind(name, emoji, id)
+      .run();
+  },
+
+  // Give up your own access to a group without touching the group itself. The
+  // only exit before this was deleting it, which deletes it for everybody.
+  async revokeAccess(groupId: number, clientId: string) {
+    const d1 = await getDb();
+    await d1
+      .prepare("DELETE FROM group_access WHERE group_id = ? AND client_id = ?")
+      .bind(groupId, clientId)
+      .run();
+  },
+
+  // How many rows in this group point at this member. It has to be zero before
+  // the member can be deleted, and the reason is worth stating: every foreign
+  // key that reaches `members` is ON DELETE CASCADE. Removing somebody who has
+  // paid for something therefore does not orphan a row, it *deletes the
+  // expense* -- and removing somebody who merely owes a share deletes that
+  // share, leaving an expense whose splits no longer sum to its amount. The
+  // database will do all of this silently, so the guard has to be here.
+  //
+  // `expenses.paid_by_member_id` is counted too: it is the legacy column kept
+  // by migration 0009 (SQLite cannot drop a column), it still carries its
+  // cascade, and it is still set on every expense written since.
+  async countMemberActivity(groupId: number, memberId: number) {
+    const d1 = await getDb();
+    const row = await d1
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM expense_payers ep
+              JOIN expenses e ON e.id = ep.expense_id
+             WHERE e.group_id = ?1 AND ep.member_id = ?2)
+         + (SELECT COUNT(*) FROM expense_splits es
+              JOIN expenses e ON e.id = es.expense_id
+             WHERE e.group_id = ?1 AND es.member_id = ?2)
+         + (SELECT COUNT(*) FROM expenses e
+             WHERE e.group_id = ?1 AND e.paid_by_member_id = ?2)
+         + (SELECT COUNT(*) FROM settlements s
+             WHERE s.group_id = ?1 AND (s.from_member_id = ?2 OR s.to_member_id = ?2))
+           AS n`
+      )
+      .bind(groupId, memberId)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  },
+
+  async removeMember(groupId: number, memberId: number) {
+    const d1 = await getDb();
+    await d1
+      .prepare("DELETE FROM members WHERE id = ? AND group_id = ?")
+      .bind(memberId, groupId)
+      .run();
+  },
+
   async getMembers(groupId: number) {
     const d1 = await getDb();
     const { results } = await d1
@@ -207,8 +294,23 @@ export const db = {
     return results;
   },
 
-  async addMember(groupId: number, name: string, color: string) {
+  // The colour is picked here rather than passed in: the palette lives in this
+  // module, so a caller that had to know it is a caller that can get it wrong --
+  // the old signature took one and its only would-be caller would have had to
+  // hard-code a default, giving every late arrival the same terracotta.
+  //
+  // First shade nobody in the group is using, so somebody added in September is
+  // as distinguishable as the people named when the group was created.
+  async addMember(groupId: number, name: string) {
     const d1 = await getDb();
+    const { results: existing } = await d1
+      .prepare("SELECT color FROM members WHERE group_id = ?")
+      .bind(groupId)
+      .all<{ color: string }>();
+
+    const used = new Set(existing.map((m) => m.color));
+    const color = colors.find((c) => !used.has(c)) ?? colors[existing.length % colors.length];
+
     const result = await d1
       .prepare("INSERT INTO members (group_id, name, color) VALUES (?, ?, ?)")
       .bind(groupId, name, color)
@@ -229,7 +331,10 @@ export const db = {
          FROM expenses e
          LEFT JOIN receipts r ON r.id = e.receipt_id
          WHERE e.group_id = ?
-         ORDER BY e.created_at DESC`
+         -- By the day it was spent, then by insertion order within that day.
+         -- Ordering by created_at alone put a dinner from last week, entered
+         -- today, above everything that actually happened since.
+         ORDER BY COALESCE(e.spent_at, e.created_at) DESC, e.id DESC`
       )
       .bind(groupId)
       .all<ExpenseRow>();
@@ -288,16 +393,29 @@ export const db = {
     splits: SplitInput[],
     splitMode: SplitMode,
     receiptId?: string,
-    category?: string
+    category?: string,
+    // Omitted means "now", which is what the column default already says.
+    spentAt?: string
   ) {
     const d1 = await getDb();
     const primaryPayerId = payers.reduce((a, b) => (b.amount > a.amount ? b : a)).memberId;
 
     const expenseResult = await d1
       .prepare(
-        "INSERT INTO expenses (group_id, description, amount_cents, paid_by_member_id, receipt_id, category, split_mode) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        `INSERT INTO expenses
+           (group_id, description, amount_cents, paid_by_member_id, receipt_id, category, split_mode, spent_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`
       )
-      .bind(groupId, description, amountCents, primaryPayerId, receiptId ?? null, category ?? null, splitMode)
+      .bind(
+        groupId,
+        description,
+        amountCents,
+        primaryPayerId,
+        receiptId ?? null,
+        category ?? null,
+        splitMode,
+        spentAt ?? null
+      )
       .run();
     const expenseId = expenseResult.meta.last_row_id;
 
@@ -321,6 +439,21 @@ export const db = {
 
   // Create or update the receipt a scan belongs to. Called before its lines are
   // written, so `expenses.receipt_id` never points at nothing.
+  // The day a receipt is filed under: the earliest of its lines, matching what
+  // `receiptDate` computes for display. Used when a line is added to an existing
+  // receipt, so the new row joins the shop's own day instead of today's.
+  async getReceiptSpentAt(receiptId: string, groupId: number) {
+    const d1 = await getDb();
+    const row = await d1
+      .prepare(
+        `SELECT MIN(COALESCE(spent_at, created_at)) AS day
+           FROM expenses WHERE receipt_id = ? AND group_id = ?`
+      )
+      .bind(receiptId, groupId)
+      .first<{ day: string | null }>();
+    return row?.day ?? undefined;
+  },
+
   async upsertReceipt(
     receiptId: string,
     groupId: number,
@@ -342,14 +475,6 @@ export const db = {
       .run();
   },
 
-  async renameReceipt(receiptId: string, name: string, groupId: number) {
-    const d1 = await getDb();
-    await d1
-      .prepare("UPDATE receipts SET name = ? WHERE id = ? AND group_id = ?")
-      .bind(name, receiptId, groupId)
-      .run();
-  },
-
   async updateExpense(
     expenseId: number,
     groupId: number,
@@ -358,16 +483,31 @@ export const db = {
     payers: PayerInput[],
     splits: SplitInput[],
     splitMode: SplitMode,
-    category?: string
+    category?: string,
+    // Omitted leaves the stored date alone, so a caller that does not deal in
+    // dates cannot blank one out.
+    spentAt?: string
   ) {
     const d1 = await getDb();
     const primaryPayerId = payers.reduce((a, b) => (b.amount > a.amount ? b : a)).memberId;
 
     await d1
       .prepare(
-        "UPDATE expenses SET description = ?, amount_cents = ?, paid_by_member_id = ?, category = ?, split_mode = ? WHERE id = ? AND group_id = ?"
+        `UPDATE expenses
+            SET description = ?, amount_cents = ?, paid_by_member_id = ?, category = ?,
+                split_mode = ?, spent_at = COALESCE(?, spent_at)
+          WHERE id = ? AND group_id = ?`
       )
-      .bind(description, amountCents, primaryPayerId, category ?? null, splitMode, expenseId, groupId)
+      .bind(
+        description,
+        amountCents,
+        primaryPayerId,
+        category ?? null,
+        splitMode,
+        spentAt ?? null,
+        expenseId,
+        groupId
+      )
       .run();
 
     // Delete old payers/splits and insert the new ones

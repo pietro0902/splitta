@@ -8,15 +8,18 @@ import {
   Loader2,
   Check,
   TriangleAlert,
+  ScanLine,
   Image as ImageIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { MemberAvatar } from "@/components/member-avatar";
 import { PayerEditor } from "@/components/payer-editor";
 import { computePayers } from "@/lib/payers";
 import { formatMoney, toCents } from "@/lib/money";
 import { createExpensesFromReceipt } from "@/lib/actions";
 import { scanReceipt, type OcrProgress } from "@/lib/ocr";
+import { receiptReconciles } from "@/lib/receipts";
+import { toSpentAt, todayInput } from "@/lib/dates";
+import { DateField } from "@/components/date-field";
 import type { ParsedItem } from "@/lib/receipt-parser";
 import { EXPENSE_CATEGORIES } from "@/lib/db-types";
 import type { Member } from "@/lib/db-types";
@@ -25,8 +28,8 @@ type ItemWithSplits = ParsedItem & {
   splitMemberIds: Set<number>;
 };
 
-/** One cent of slack absorbs the receipt's own rounding. */
-const TOTAL_TOLERANCE_CENTS = 1;
+/** How many lines a long receipt shows before it collapses. */
+const VISIBLE_LINES = 6;
 
 export function ReceiptScanner({
   groupId,
@@ -39,10 +42,14 @@ export function ReceiptScanner({
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [items, setItems] = useState<ItemWithSplits[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [paidBy, setPaidBy] = useState<Set<number>>(new Set());
   const [paidAmounts, setPaidAmounts] = useState<Record<number, string>>({});
   const [receiptName, setReceiptName] = useState("");
   const [category, setCategory] = useState<string>("");
+  // Scanning last night's receipt this morning is the normal case, not the
+  // exception, so the day is asked for on the review screen.
+  const [day, setDay] = useState(todayInput());
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState<OcrProgress | null>(null);
@@ -84,9 +91,7 @@ export function ReceiptScanner({
     setFile(f);
     buildPreview(f)
       .then(setPreview)
-      .catch(() =>
-        setError("Couldn't read that image. Try a JPEG or PNG photo.")
-      );
+      .catch(() => setError("Non riesco a leggere questa immagine. Prova con una foto JPEG o PNG."));
   }
 
   async function handleScan() {
@@ -94,15 +99,13 @@ export function ReceiptScanner({
 
     setIsScanning(true);
     setError(null);
-    setProgress({ ratio: 0, label: "Starting" });
+    setProgress({ ratio: 0, label: "Avvio" });
 
     try {
       const result = await scanReceipt(file, setProgress);
 
       if (result.items.length === 0) {
-        setError(
-          "Couldn't read any items. Try a straighter, better-lit photo of the receipt."
-        );
+        setError("Non ho letto nessuna voce. Prova con una foto più dritta e più illuminata.");
         return;
       }
 
@@ -115,7 +118,7 @@ export function ReceiptScanner({
       setDeclaredTotal(result.declaredTotal);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      setError(`Scan failed: ${message}`);
+      setError(`Scansione fallita: ${message}`);
     } finally {
       setIsScanning(false);
       setProgress(null);
@@ -169,7 +172,7 @@ export function ReceiptScanner({
   // captured at scan time would keep contradicting the live total and could
   // never clear once they fixed the misread line.
   const discrepancy = declaredTotalCents !== null ? totalCents - declaredTotalCents : null;
-  const totalMatches = discrepancy !== null && Math.abs(discrepancy) <= TOTAL_TOLERANCE_CENTS;
+  const totalMatches = declaredTotalCents !== null && receiptReconciles(totalCents, declaredTotalCents);
 
   function handleSubmit() {
     if (!items || !payerResult.valid) return;
@@ -184,7 +187,8 @@ export function ReceiptScanner({
         })),
         receiptName,
         category || undefined,
-        declaredTotalCents ?? undefined
+        declaredTotalCents ?? undefined,
+        toSpentAt(day)
       );
       reset();
     });
@@ -195,26 +199,29 @@ export function ReceiptScanner({
     setPreview(null);
     setFile(null);
     setItems(null);
+    setShowAll(false);
     setPaidBy(new Set());
     setPaidAmounts({});
     setReceiptName("");
     setCategory("");
+    setDay(todayInput());
     setError(null);
     setDeclaredTotal(null);
     setProgress(null);
   }
 
+  const visibleItems = items && !showAll ? items.slice(0, VISIBLE_LINES) : items;
+  const hiddenCount = items && !showAll ? Math.max(0, items.length - VISIBLE_LINES) : 0;
+
   return (
     <>
-      <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.97 }}
+      <button
         onClick={() => setOpen(true)}
-        className="flex items-center justify-center gap-2 rounded-2xl bg-card border border-border px-4 py-4 font-semibold hover:bg-accent/50 transition-colors whitespace-nowrap"
+        aria-label="Scansiona uno scontrino"
+        className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-border text-primary transition-colors hover:bg-muted active:translate-y-px"
       >
-        <Camera className="size-5 shrink-0" />
-        <span className="text-sm sm:text-base">Scan</span>
-      </motion.button>
+        <ScanLine className="size-5" />
+      </button>
 
       <AnimatePresence>
         {open && (
@@ -222,23 +229,28 @@ export function ReceiptScanner({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4"
+            className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-4"
             onClick={(e) => e.target === e.currentTarget && reset()}
           >
             <motion.div
-              initial={{ opacity: 0, y: 100 }}
+              initial={{ opacity: 0, y: 60 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 100 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl bg-card border border-border p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+              exit={{ opacity: 0, y: 60 }}
+              transition={{ type: "spring", damping: 28, stiffness: 320 }}
+              className="max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] border border-border bg-raised p-5 pb-8 sm:max-w-lg sm:rounded-[22px] sm:pb-5"
             >
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                  <Camera className="size-5 text-primary" />
-                  <h2 className="font-heading text-xl font-bold">Scan Receipt</h2>
-                </div>
-                <button onClick={reset} className="text-muted-foreground hover:text-foreground">
-                  <X className="size-5" />
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-border sm:hidden" />
+
+              <div className="mb-5 flex items-center justify-between">
+                <h2 className="text-lg font-medium">
+                  {items ? "Controlla lo scontrino" : "Scansiona uno scontrino"}
+                </h2>
+                <button
+                  onClick={reset}
+                  aria-label="Chiudi"
+                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-4.5" />
                 </button>
               </div>
 
@@ -267,17 +279,21 @@ export function ReceiptScanner({
 
                   {preview ? (
                     <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- a
+                          data URL built on-device; next/image would only add a
+                          loader in front of bytes that never touch the network */}
                       <img
                         src={preview}
-                        alt="Receipt preview"
-                        className="w-full rounded-xl border border-border object-contain max-h-64"
+                        alt="Anteprima dello scontrino"
+                        className="max-h-64 w-full rounded-xl border border-border object-contain"
                       />
                       <button
                         onClick={() => {
                           setPreview(null);
                           setFile(null);
                         }}
-                        className="absolute top-2 right-2 rounded-full bg-black/60 text-white p-1.5"
+                        aria-label="Togli la foto"
+                        className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5 text-white"
                       >
                         <X className="size-4" />
                       </button>
@@ -286,28 +302,22 @@ export function ReceiptScanner({
                     <div className="grid grid-cols-2 gap-3">
                       <button
                         onClick={() => cameraRef.current?.click()}
-                        className="rounded-xl border-2 border-dashed border-border bg-muted/30 px-4 py-10 text-center hover:border-primary/50 hover:bg-muted/50 transition-all"
+                        className="rounded-2xl border border-dashed border-border px-4 py-10 text-center transition-colors hover:border-primary/50 hover:bg-muted"
                       >
-                        <Camera className="size-7 mx-auto mb-2.5 text-muted-foreground" />
-                        <p className="text-sm font-medium text-muted-foreground">
-                          Take a photo
-                        </p>
+                        <Camera className="mx-auto mb-2.5 size-6 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Scatta una foto</p>
                       </button>
                       <button
                         onClick={() => fileRef.current?.click()}
-                        className="rounded-xl border-2 border-dashed border-border bg-muted/30 px-4 py-10 text-center hover:border-primary/50 hover:bg-muted/50 transition-all"
+                        className="rounded-2xl border border-dashed border-border px-4 py-10 text-center transition-colors hover:border-primary/50 hover:bg-muted"
                       >
-                        <ImageIcon className="size-7 mx-auto mb-2.5 text-muted-foreground" />
-                        <p className="text-sm font-medium text-muted-foreground">
-                          From gallery
-                        </p>
+                        <ImageIcon className="mx-auto mb-2.5 size-6 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Dalla galleria</p>
                       </button>
                     </div>
                   )}
 
-                  {error && (
-                    <p className="text-sm text-destructive text-center">{error}</p>
-                  )}
+                  {error && <p className="text-center text-sm text-destructive">{error}</p>}
 
                   {isScanning && progress && (
                     <div className="space-y-2">
@@ -319,60 +329,101 @@ export function ReceiptScanner({
                         />
                       </div>
                       <p className="text-center text-xs text-muted-foreground">
-                        {progress.label} — runs on your device, nothing is uploaded
+                        {progress.label} — gira sul tuo telefono, non si carica niente
                       </p>
                     </div>
                   )}
 
-                  <Button
+                  <button
                     onClick={handleScan}
                     disabled={!file || isScanning}
-                    className="w-full h-12 rounded-xl text-base font-semibold"
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                   >
                     {isScanning ? (
                       <>
-                        <Loader2 className="size-4 animate-spin mr-2" />
-                        Scanning...
+                        <Loader2 className="size-4 animate-spin" />
+                        Scansione…
                       </>
                     ) : (
-                      "Scan Receipt"
+                      "Scansiona"
                     )}
-                  </Button>
+                  </button>
                 </div>
               ) : (
-                /* Items review phase */
                 <div className="space-y-5">
-                  {/* Receipt name */}
+                  {/* Whether the scan reconciles is the first thing on this
+                      screen, not a line of small print at the bottom: it is the
+                      one question a reviewer has, and the answer decides whether
+                      the rest of the list needs reading at all. */}
+                  {declaredTotalCents === null ? (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted px-3.5 py-3 text-xs text-muted-foreground">
+                      <TriangleAlert className="mt-px size-4 shrink-0" />
+                      <p className="leading-relaxed">
+                        Non ho letto il totale stampato, quindi queste {items.length} voci non si
+                        possono verificare da sole. Confrontale con lo scontrino prima di
+                        aggiungerle.
+                      </p>
+                    </div>
+                  ) : (
+                    <div
+                      className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-xs ${
+                        totalMatches
+                          ? "border-ok-border bg-ok-field text-ok-foreground"
+                          : "border-negative/30 bg-negative/10 text-negative"
+                      }`}
+                    >
+                      {totalMatches ? (
+                        <Check className="mt-px size-4 shrink-0" />
+                      ) : (
+                        <TriangleAlert className="mt-px size-4 shrink-0" />
+                      )}
+                      <p className="leading-relaxed">
+                        {totalMatches ? (
+                          <>Le voci tornano con il totale stampato ({formatMoney(declaredTotalCents)}).</>
+                        ) : (
+                          <>
+                            Lo scontrino dice {formatMoney(declaredTotalCents)}, ma le voci fanno{" "}
+                            {formatMoney(totalCents)} — {discrepancy! > 0 ? "in più" : "in meno"} di{" "}
+                            {formatMoney(Math.abs(discrepancy!))}. Cerca una riga saltata o letta
+                            male.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  )}
+
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                      Receipt name (optional)
+                    <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                      Nome dello scontrino
                     </label>
                     <input
                       type="text"
                       value={receiptName}
                       onChange={(e) => setReceiptName(e.target.value)}
-                      placeholder="e.g. Grocery store, Dinner..."
-                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+                      placeholder="es. Supermercato, Cena…"
+                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
+
+                  <DateField value={day} onChange={setDay} />
 
                   {/* One category for the whole receipt. Asked here because
                       this is the only moment the shop is on screen; without it
                       every scanned line is stored uncategorised and drops out
                       of the analytics breakdown entirely. */}
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                      Category (optional)
+                    <label className="mb-2 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                      Categoria
                     </label>
                     <div className="flex flex-wrap gap-1.5">
                       {EXPENSE_CATEGORIES.map((cat) => (
                         <button
                           key={cat.id}
                           onClick={() => setCategory(category === cat.id ? "" : cat.id)}
-                          className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all ${
+                          className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
                             category === cat.id
-                              ? "bg-primary/10 ring-2 ring-primary text-primary"
-                              : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                              ? "bg-brand-field text-primary ring-1 ring-primary"
+                              : "bg-muted text-muted-foreground hover:text-foreground"
                           }`}
                         >
                           <span>{cat.emoji}</span>
@@ -382,7 +433,89 @@ export function ReceiptScanner({
                     </div>
                   </div>
 
-                  {/* Paid by */}
+                  {/* The parsed lines, as a receipt reads: name on the left,
+                      price on the right, hairlines between. */}
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                      Voci ({items.length})
+                    </label>
+                    <div className="divide-y divide-hairline">
+                      {visibleItems!.map((item, idx) => (
+                        <div key={idx} className="py-2.5">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) => updateItem(idx, "name", e.target.value)}
+                              className="min-w-0 flex-1 rounded-lg bg-transparent px-1 py-1 text-sm focus:bg-muted focus:outline-none"
+                            />
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={item.price}
+                              onChange={(e) => updateItem(idx, "price", e.target.value)}
+                              className="figure w-20 rounded-lg bg-transparent px-1 py-1 text-right text-sm focus:bg-muted focus:outline-none"
+                            />
+                            <button
+                              onClick={() => removeItem(idx)}
+                              aria-label="Togli la voce"
+                              className="shrink-0 p-1 text-muted-foreground/60 transition-colors hover:text-destructive"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Why this price is what it is — helps the review pass */}
+                          {(item.discounted || item.quantity) && (
+                            <p className="px-1 text-[11px] text-muted-foreground">
+                              {[
+                                item.quantity ? `${item.quantity} × prezzo unitario` : null,
+                                item.discounted ? "sconto applicato" : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          )}
+
+                          {/* Who splits this line, as chips: a receipt's whole
+                              point is that one line can be shared differently
+                              from the one above it. */}
+                          <div className="no-scrollbar -mx-1 mt-1 flex gap-1 overflow-x-auto px-1 py-0.5">
+                            {members.map((m) => {
+                              const on = item.splitMemberIds.has(m.id);
+                              return (
+                                <button
+                                  key={m.id}
+                                  onClick={() => toggleItemSplit(idx, m.id)}
+                                  aria-label={`${m.name} divide questa voce`}
+                                  className={`shrink-0 rounded-[9px] transition-opacity ${
+                                    on ? "ring-1 ring-primary" : "opacity-35"
+                                  }`}
+                                >
+                                  <MemberAvatar name={m.name} color={m.color} size="sm" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {hiddenCount > 0 && (
+                      <button
+                        onClick={() => setShowAll(true)}
+                        className="mt-2 w-full rounded-lg py-2 text-sm text-primary transition-colors hover:bg-muted"
+                      >
+                        + altre {hiddenCount} voci
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-border pt-3">
+                    <span className="text-sm text-muted-foreground">Totale</span>
+                    <span className="figure text-lg font-medium">{formatMoney(totalCents)}</span>
+                  </div>
+
                   <PayerEditor
                     members={members}
                     selected={paidBy}
@@ -392,159 +525,32 @@ export function ReceiptScanner({
                     result={payerResult}
                   />
 
-                  {/* Items list */}
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                      Items ({items.length})
-                    </label>
-                    <div className="space-y-3">
-                      {items.map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="rounded-xl border border-border bg-background p-4 space-y-3"
-                        >
-                          <div className="flex items-start gap-2">
-                            <input
-                              type="text"
-                              value={item.name}
-                              onChange={(e) => updateItem(idx, "name", e.target.value)}
-                              className="flex-1 min-w-0 rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-                            />
-                            <div className="relative shrink-0">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">
-                                &euro;
-                              </span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={item.price}
-                                onChange={(e) => updateItem(idx, "price", e.target.value)}
-                                className="w-24 rounded-lg border border-border bg-card pl-7 pr-2 py-2 text-sm font-mono tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
-                              />
-                            </div>
-                            <button
-                              onClick={() => removeItem(idx)}
-                              className="text-muted-foreground hover:text-destructive p-1.5 shrink-0"
-                            >
-                              <X className="size-4" />
-                            </button>
-                          </div>
-
-                          {/* Why this price is what it is — helps the review pass */}
-                          {(item.discounted || item.quantity) && (
-                            <p className="text-[11px] text-muted-foreground -mt-1">
-                              {[
-                                item.quantity ? `${item.quantity} × unit price` : null,
-                                item.discounted ? "discount applied" : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </p>
-                          )}
-
-                          {/* Split selection per item — single scrollable row on mobile */}
-                          <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:mx-0 sm:px-0">
-                            {members.map((m) => (
-                              <button
-                                key={m.id}
-                                onClick={() => toggleItemSplit(idx, m.id)}
-                                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all shrink-0 whitespace-nowrap ${
-                                  item.splitMemberIds.has(m.id)
-                                    ? "bg-primary/10 ring-1 ring-primary text-primary"
-                                    : "bg-muted/50 text-muted-foreground"
-                                }`}
-                              >
-                                <MemberAvatar name={m.name} color={m.color} size="sm" />
-                                {m.name}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Cross-check against the total printed on the receipt */}
-                  {/* No printed total means no automatic cross-check. Say so:
-                      an absent banner would read as "all good" when in fact
-                      nothing was verified. */}
-                  {declaredTotal === null && (
-                    <div className="flex items-start gap-2 rounded-xl border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                      <TriangleAlert className="size-4 shrink-0 mt-px" />
-                      <p className="leading-relaxed">
-                        Couldn&apos;t read the total printed on the receipt, so these{" "}
-                        {items.length} items can&apos;t be checked automatically. Compare
-                        them with the receipt before adding.
-                      </p>
-                    </div>
-                  )}
-
-                  {declaredTotalCents !== null && discrepancy !== null && (
-                    <div
-                      className={`flex items-start gap-2 rounded-xl border p-3 text-xs ${
-                        totalMatches
-                          ? "border-primary/30 bg-primary/5 text-primary"
-                          : "border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-500"
-                      }`}
-                    >
-                      {totalMatches ? (
-                        <Check className="size-4 shrink-0 mt-px" />
-                      ) : (
-                        <TriangleAlert className="size-4 shrink-0 mt-px" />
-                      )}
-                      <p className="leading-relaxed">
-                        {totalMatches ? (
-                          <>
-                            Items add up to the receipt total (
-                            {formatMoney(declaredTotalCents)}).
-                          </>
-                        ) : (
-                          <>
-                            The receipt says {formatMoney(declaredTotalCents)}, but these items
-                            add up to {formatMoney(totalCents)} —{" "}
-                            {discrepancy > 0 ? "over" : "short"} by{" "}
-                            {formatMoney(Math.abs(discrepancy))}. Check for a missing or misread
-                            line.
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Total & submit */}
-                  <div className="flex items-center justify-between pt-2 border-t border-border">
-                    <span className="text-sm font-medium text-muted-foreground">Total</span>
-                    <span className="text-lg font-heading font-bold tabular-nums">
-                      {formatMoney(totalCents)}
-                    </span>
-                  </div>
-
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
+                    <button
                       onClick={() => {
                         setItems(null);
+                        setShowAll(false);
                         setError(null);
                         setDeclaredTotal(null);
                       }}
-                      className="flex-1 h-12 rounded-xl text-base"
+                      className="h-12 shrink-0 rounded-full border border-border px-5 text-[15px] text-muted-foreground transition-colors hover:text-foreground"
                     >
-                      Re-scan
-                    </Button>
-                    <Button
+                      Riscansiona
+                    </button>
+                    <button
                       onClick={handleSubmit}
                       disabled={!payerResult.valid || items.length === 0 || isSubmitting}
-                      className="flex-1 h-12 rounded-xl text-base font-semibold"
+                      className="flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                     >
                       {isSubmitting ? (
                         <>
-                          <Loader2 className="size-4 animate-spin mr-2" />
-                          Adding...
+                          <Loader2 className="size-4 animate-spin" />
+                          Aggiunta…
                         </>
                       ) : (
-                        `Add ${items.length} Expenses`
+                        `Aggiungi ${items.length} voci`
                       )}
-                    </Button>
+                    </button>
                   </div>
                 </div>
               )}

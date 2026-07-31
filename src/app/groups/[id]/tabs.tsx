@@ -1,19 +1,20 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { motion } from "framer-motion";
-import { Receipt, TrendingUp, ArrowLeftRight, BarChart3, ShoppingCart } from "lucide-react";
 
 const TABS = [
-  { id: "expenses", label: "Expenses", icon: Receipt },
-  { id: "balances", label: "Balances", icon: TrendingUp },
-  { id: "settle", label: "Settle", icon: ArrowLeftRight },
-  { id: "shopping", label: "List", icon: ShoppingCart },
-  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "expenses", label: "Spese" },
+  { id: "balances", label: "Saldi" },
+  { id: "settle", label: "Pareggi" },
+  { id: "shopping", label: "Lista" },
+  { id: "stats", label: "Stats" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
+// A scrolling row of pills rather than five equal segments in a tray. The tray
+// forced every label to fit the narrowest phone, which is why the labels were
+// stacked under icons at 10px; pills size to their text and the row scrolls.
 export function GroupTabs({
   expensesTab,
   balancesTab,
@@ -35,58 +36,43 @@ export function GroupTabs({
 
   return (
     <div>
-      <div className="flex gap-1 rounded-2xl bg-muted p-1 mb-5">
+      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
         {TABS.map((tab) => {
           const badge =
             (tab.id === "expenses" && expenseCount > 0 && expenseCount) ||
             (tab.id === "shopping" && shoppingCount > 0 && shoppingCount) ||
             null;
+          const isActive = active === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => setActive(tab.id)}
-              className="relative flex-1 flex items-center justify-center rounded-xl px-1.5 sm:px-3 py-2.5 text-xs sm:text-sm font-medium transition-colors"
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-2 text-sm transition-colors ${
+                isActive
+                  ? "border border-brand-border bg-brand-field text-primary"
+                  : "border border-transparent text-muted-foreground hover:text-foreground"
+              }`}
             >
-              {active === tab.id && (
-                <motion.div
-                  layoutId="activeTab"
-                  className="absolute inset-0 rounded-xl bg-card shadow-sm"
-                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                />
-              )}
-              <span className="relative z-10 flex flex-col sm:flex-row items-center gap-0.5 sm:gap-1.5">
-                <span className="relative">
-                  <tab.icon className="size-4 sm:size-3.5 shrink-0" />
-                  {badge && (
-                    <span className="absolute -top-1.5 -right-2 sm:hidden text-[9px] leading-none tabular-nums bg-primary text-primary-foreground size-3.5 flex items-center justify-center rounded-full">
-                      {badge}
-                    </span>
-                  )}
+              {tab.label}
+              {badge && (
+                <span
+                  className={`figure text-[11px] ${isActive ? "text-primary/70" : "text-muted-foreground/70"}`}
+                >
+                  {badge}
                 </span>
-                <span className="text-[10px] sm:text-xs leading-tight">{tab.label}</span>
-                {badge && (
-                  <span className="hidden sm:inline text-[10px] tabular-nums bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">
-                    {badge}
-                  </span>
-                )}
-              </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      <motion.div
-        key={active}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
-      >
+      <div className="mt-4">
         {active === "expenses" && expensesTab}
         {active === "balances" && balancesTab}
         {active === "settle" && settlementsTab}
         {active === "shopping" && shoppingTab}
         {active === "stats" && analyticsTab}
-      </motion.div>
+      </div>
     </div>
   );
 }

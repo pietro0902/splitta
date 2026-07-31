@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, CheckCircle2, History, Trash2, Check } from "lucide-react";
+import { ArrowRight, Trash2 } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
 import { recordSettlement, deleteSettlementRecord } from "@/lib/actions";
 import { formatMoney } from "@/lib/money";
@@ -21,105 +20,83 @@ export function SettlementView({
 
   return (
     <div className="space-y-5">
-      {/* Pending settlements */}
       {settlements.length === 0 ? (
-        <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 py-4">
-          <CheckCircle2 className="size-5" />
-          <span className="font-medium text-sm">All settled up!</span>
+        <div className="rounded-xl border border-ok-border bg-ok-field px-4 py-3.5 text-sm text-ok-foreground">
+          Tutto in pari, non c&apos;è niente da saldare.
         </div>
       ) : (
-        <div className="space-y-3">
-          {settlements.map((s, i) => (
-            <SettlementCard key={`${s.from.id}-${s.to.id}`} settlement={s} groupId={groupId} index={i} />
-          ))}
+        <div>
+          <h3 className="mb-2.5 text-xs uppercase tracking-[0.08em] text-muted-foreground">
+            Chi paga chi
+          </h3>
+          <div className="space-y-2">
+            {settlements.map((s) => (
+              <SettlementCard key={`${s.from.id}-${s.to.id}`} settlement={s} groupId={groupId} />
+            ))}
+          </div>
+          {/* The greedy matching produces the fewest transfers that close the
+              group; saying how many turns that from a list into a plan. */}
+          <p className="mt-3 text-xs text-muted-foreground">
+            {settlements.length === 1
+              ? "1 movimento per chiudere tutto"
+              : `${settlements.length} movimenti per chiudere tutto`}
+          </p>
         </div>
       )}
 
-      {/* History toggle */}
       {settlementRecords.length > 0 && (
         <div>
           <button
             onClick={() => setShowHistory(!showHistory)}
-            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            <History className="size-4" />
-            Payment history ({settlementRecords.length})
+            Pagamenti registrati ({settlementRecords.length})
           </button>
 
-          <AnimatePresence>
-            {showHistory && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="mt-3 space-y-2">
-                  {settlementRecords.map((r) => (
-                    <SettlementRecordRow key={r.id} record={r} groupId={groupId} />
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {showHistory && (
+            <div className="mt-3 divide-y divide-hairline">
+              {settlementRecords.map((r) => (
+                <SettlementRecordRow key={r.id} record={r} groupId={groupId} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function SettlementCard({
-  settlement: s,
-  groupId,
-  index,
-}: {
-  settlement: Settlement;
-  groupId: number;
-  index: number;
-}) {
+function SettlementCard({ settlement: s, groupId }: { settlement: Settlement; groupId: number }) {
   const [isPending, startTransition] = useTransition();
 
-  function handleSettle() {
-    startTransition(async () => {
-      await recordSettlement(groupId, s.from.id, s.to.id, s.amount_cents);
-    });
-  }
-
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.08 }}
-      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-    >
+    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3.5 py-3">
       <MemberAvatar name={s.from.name} color={s.from.color} size="sm" />
-      <span className="text-sm font-medium truncate">{s.from.name}</span>
-      <div className="flex items-center gap-1 text-primary">
-        <ArrowRight className="size-4" />
-        <span className="font-heading font-bold text-sm tabular-nums">
-          {formatMoney(s.amount_cents)}
-        </span>
-        <ArrowRight className="size-4" />
-      </div>
-      <span className="text-sm font-medium truncate">{s.to.name}</span>
+      <span className="truncate text-sm">{s.from.name}</span>
+      <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
       <MemberAvatar name={s.to.name} color={s.to.color} size="sm" />
+      <span className="truncate text-sm">{s.to.name}</span>
+      <span className="figure ml-auto shrink-0 text-sm font-medium">
+        {formatMoney(s.amount_cents)}
+      </span>
       <button
-        onClick={handleSettle}
+        onClick={() =>
+          startTransition(async () => {
+            await recordSettlement(groupId, s.from.id, s.to.id, s.amount_cents);
+          })
+        }
         disabled={isPending}
-        className="ml-auto shrink-0 flex items-center gap-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1.5 text-xs font-medium hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+        className="shrink-0 rounded-full border border-brand-border px-2.5 py-1 text-xs text-primary transition-colors hover:bg-brand-field disabled:opacity-50"
       >
-        <Check className="size-3.5" />
-        {isPending ? "..." : "Paid"}
+        {isPending ? "…" : "Salda"}
       </button>
-    </motion.div>
+    </div>
   );
 }
 
 function SettlementRecordRow({ record: r, groupId }: { record: SettlementRecord; groupId: number }) {
   const [isPending, startTransition] = useTransition();
-  const date = new Date(r.created_at + "Z");
-  const formattedDate = date.toLocaleDateString("en-GB", {
+  const formattedDate = new Date(r.created_at + "Z").toLocaleDateString("it-IT", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
@@ -127,24 +104,23 @@ function SettlementRecordRow({ record: r, groupId }: { record: SettlementRecord;
   });
 
   return (
-    <div className="group flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5">
+    <div className="group flex items-center gap-2 py-2.5">
       <MemberAvatar name={r.from_name} color={r.from_color} size="sm" />
-      <span className="text-xs font-medium truncate">{r.from_name}</span>
-      <ArrowRight className="size-3 text-muted-foreground shrink-0" />
-      <span className="text-xs font-medium truncate">{r.to_name}</span>
+      <span className="truncate text-xs">{r.from_name}</span>
+      <ArrowRight className="size-3 shrink-0 text-muted-foreground" />
       <MemberAvatar name={r.to_name} color={r.to_color} size="sm" />
-      <span className="ml-auto text-xs font-heading font-bold tabular-nums shrink-0">
-        {formatMoney(r.amount_cents)}
-      </span>
-      <span className="text-[10px] text-muted-foreground shrink-0">{formattedDate}</span>
+      <span className="truncate text-xs">{r.to_name}</span>
+      <span className="figure ml-auto shrink-0 text-xs">{formatMoney(r.amount_cents)}</span>
+      <span className="shrink-0 text-[10px] text-muted-foreground">{formattedDate}</span>
       <button
         onClick={() => {
-          if (confirm("Delete this payment record?")) {
+          if (confirm("Eliminare questo pagamento registrato?")) {
             startTransition(() => deleteSettlementRecord(r.id, groupId));
           }
         }}
         disabled={isPending}
-        className="sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all shrink-0"
+        aria-label="Elimina il pagamento"
+        className="shrink-0 rounded-lg p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100"
       >
         <Trash2 className="size-3" />
       </button>

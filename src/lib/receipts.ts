@@ -10,6 +10,7 @@
 // Pure and client-safe: used by the expense list, the group page's tab badge
 // and the analytics view.
 import type { Expense, ExpensePayer } from "./db-types";
+import { expenseDate } from "./dates";
 
 export type ExpenseEntry =
   | { type: "single"; expense: Expense }
@@ -21,7 +22,10 @@ export type ExpenseEntry =
 // receipt to add a forgotten item re-dated the whole thing to today and jumped
 // it to the top of the list.
 export function receiptDate(expenses: Expense[]): string {
-  return expenses.reduce((min, e) => (e.created_at < min ? e.created_at : min), expenses[0].created_at);
+  return expenses.reduce(
+    (min, e) => (expenseDate(e) < min ? expenseDate(e) : min),
+    expenseDate(expenses[0])
+  );
 }
 
 // Everyone who put money into this receipt, with what they paid across all of
@@ -39,6 +43,21 @@ export function receiptPayers(expenses: Expense[]): ExpensePayer[] {
     }
   }
   return Array.from(byMember.values()).sort((a, b) => b.amount_cents - a.amount_cents);
+}
+
+// Does a scan add up? One cent of slack absorbs the receipt's own rounding --
+// this is the paper disagreeing with itself, not float noise, so it is not the
+// tolerance the money rules forbid.
+//
+// It lives here because three surfaces ask the question and they must answer it
+// identically: the scanner as you review, the receipt editor, and the expense
+// list flagging a scan that never reconciled. When the scanner alone owned the
+// constant, a receipt it had accepted at one cent of slack came back flagged as
+// broken in the list, with no way to make the warning go away.
+export const TOTAL_TOLERANCE_CENTS = 1;
+
+export function receiptReconciles(totalCents: number, declaredCents: number): boolean {
+  return Math.abs(totalCents - declaredCents) <= TOTAL_TOLERANCE_CENTS;
 }
 
 export function groupExpenses(expenses: Expense[]): ExpenseEntry[] {
@@ -64,7 +83,7 @@ export function groupExpenses(expenses: Expense[]): ExpenseEntry[] {
 }
 
 export function entryDate(entry: ExpenseEntry): string {
-  return entry.type === "single" ? entry.expense.created_at : receiptDate(entry.expenses);
+  return entry.type === "single" ? expenseDate(entry.expense) : receiptDate(entry.expenses);
 }
 
 export function entryAmountCents(entry: ExpenseEntry): number {

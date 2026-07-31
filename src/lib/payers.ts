@@ -26,8 +26,8 @@ export function computePayers(
   amounts: Record<number, string>
 ): PayerResult {
   const base: PayerResult = { payers: [], valid: false, assigned: 0, remaining: totalCents, error: null };
-  if (!totalCents || totalCents <= 0) return { ...base, error: "Enter an amount first" };
-  if (selectedIds.length === 0) return { ...base, error: "Pick who paid" };
+  if (!totalCents || totalCents <= 0) return { ...base, error: "Inserisci prima un importo" };
+  if (selectedIds.length === 0) return { ...base, error: "Scegli chi ha pagato" };
 
   if (selectedIds.length === 1) {
     return {
@@ -54,8 +54,8 @@ export function computePayers(
     error: valid
       ? null
       : remaining > 0
-        ? `${formatMoney(remaining)} left to assign`
-        : `${formatMoney(-remaining)} over`,
+        ? `restano ${formatMoney(remaining)}`
+        : `${formatMoney(-remaining)} di troppo`,
   };
 }
 

@@ -7,10 +7,10 @@
 // assembled by hand -- so there is no dependency to install, keep current, or
 // have break on a machine without native build tools.
 //
-// The mark is a coin split into two offset halves. It is deliberately
-// provisional: it uses the app's current terracotta and commits to nothing the
-// final logo has to honour. When that is decided, change `mark()` below and
-// re-run -- every size regenerates from the one definition.
+// The mark is a receipt knocked out of a filled tile: the tile is the brand
+// cyan, and the shape you recognise is the void. It matches BrandMark in
+// src/components/brand-mark.tsx -- change both together, then re-run, and every
+// size regenerates from the one definition here.
 
 import { deflateSync } from "node:zlib";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -19,8 +19,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const TERRACOTTA = [0xc4, 0x57, 0x2a];
-const CREAM = [0xfa, 0xf7, 0xf2];
+const CYAN = [0x5e, 0xe6, 0xe6];
+const INK = [0x0b, 0x0e, 0x14];
 
 // --- PNG container -------------------------------------------------------
 
@@ -99,26 +99,39 @@ function mark(x, y, scale, tile) {
   const px = x * s;
   const py = y * s;
 
-  // A coin cut at -30 degrees into two pieces that have been pulled apart.
-  //
-  // The gap has to be carved out of the disc, not implied by moving the two
-  // halves: translating a whole circle along the cut normal leaves its middle
-  // covering the line, so the seam never opens. Each half is therefore a disc
-  // intersected with "far enough past the cut", and only then displaced.
-  const nx = Math.sin(Math.PI / 6);
-  const ny = Math.cos(Math.PI / 6);
-  const R = 0.62;
-  const GAP = 0.05; // half-width of the cut
-  const SHIFT = 0.04; // how far each piece slides away from it
+  // The receipt, as a void. Body from TOP to BASE, then a zigzag hem below it.
+  const W = 0.4; // half-width
+  const TOP = -0.54;
+  const BASE = 0.4;
+  const R = 0.09; // radius of the two top corners
+  const TEETH = 0.14; // how far the deepest point of the hem hangs below BASE
 
-  for (const dir of [1, -1]) {
-    const qx = px - nx * SHIFT * dir;
-    const qy = py - ny * SHIFT * dir;
-    const beyondCut = (qx * nx + qy * ny) * dir > GAP;
-    if (beyondCut && Math.sqrt(qx * qx + qy * qy) < R) return CREAM;
+  // Triangle wave: 0 at the peaks (both edges and the centre), 1 in the two
+  // valleys between them. Being 0 at |x| = W is what makes the hem meet the
+  // sides of the body exactly, with no step to smooth over.
+  const u = (px + W) / W;
+  const frac = u - Math.floor(u);
+  const tri = 1 - Math.abs(1 - 2 * frac);
+
+  const inBody =
+    py >= TOP &&
+    py <= BASE &&
+    Math.abs(px) <= W &&
+    // Only the top corners are rounded; the bottom ones belong to the hem.
+    (py > TOP + R ||
+      Math.abs(px) < W - R ||
+      Math.hypot(Math.abs(px) - (W - R), py - (TOP + R)) < R);
+
+  const inHem = py > BASE && py <= BASE + TEETH * tri && Math.abs(px) <= W;
+
+  if (inBody || inHem) {
+    // Two printed lines, punched back out to the tile colour.
+    const line = (x0, x1, y0, y1) => px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    if (line(-0.24, 0.24, -0.24, -0.12) || line(-0.24, 0.04, 0.02, 0.14)) return CYAN;
+    return INK;
   }
 
-  return TERRACOTTA;
+  return CYAN;
 }
 
 function render(size, { scale = 1, tile = false } = {}) {

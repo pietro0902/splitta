@@ -27,7 +27,7 @@ export async function createGroup(formData: FormData) {
     .filter(Boolean);
 
   if (!name || memberNames.length < 2) {
-    return { error: "Name and at least 2 members are required" };
+    return { error: "Servono un nome e almeno 2 persone" };
   }
 
   // The one place a brand-new visitor gets an identity, alongside redeeming an
@@ -60,6 +60,60 @@ export async function deleteGroup(groupId: number) {
   revalidatePath("/");
 }
 
+// Rename a group, or change its emoji. Both were decided once, at creation, and
+// were then unchangeable -- including for the group whose name was a typo.
+export async function updateGroup(
+  groupId: number,
+  name: string,
+  emoji: string
+): Promise<{ error: string } | undefined> {
+  await assertAccess(groupId);
+
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Serve un nome" };
+
+  await db.updateGroup(groupId, trimmed, emoji.trim() || "👥");
+  revalidatePath(`/groups/${groupId}`);
+  revalidatePath("/");
+}
+
+// Remove somebody from a group. Refused outright once they have taken part in
+// anything, and that is not caution for its own sake: every foreign key into
+// `members` cascades, so the delete would take the expenses they paid for with
+// them and shred the splits of the ones they only owed a share of. See
+// db.countMemberActivity.
+export async function removeMember(
+  groupId: number,
+  memberId: number
+): Promise<{ error: string } | undefined> {
+  await assertAccess(groupId);
+  await assertMembersInGroup(groupId, [memberId]);
+
+  const activity = await db.countMemberActivity(groupId, memberId);
+  if (activity > 0) {
+    return {
+      error: "Ha già spese o pareggi in questo gruppo: toglierlo cancellerebbe anche quelli.",
+    };
+  }
+
+  const members = await db.getMembers(groupId);
+  if (members.length <= 2) {
+    return { error: "Un gruppo ha bisogno di almeno due persone" };
+  }
+
+  await db.removeMember(groupId, memberId);
+  revalidatePath(`/groups/${groupId}`);
+  revalidatePath("/");
+}
+
+// Leave a group: drops this browser's access row and nothing else, so the group
+// carries on for everyone else. Rejoining means using the invite link again.
+export async function leaveGroup(groupId: number) {
+  const clientId = await assertAccess(groupId);
+  await db.revokeAccess(groupId, clientId);
+  revalidatePath("/");
+}
+
 // Join a group from its invite link. The token is the credential here -- it is
 // what the holder of the link proves -- so this is the one action that grants
 // access rather than checking it.
@@ -71,9 +125,9 @@ export async function joinGroup(
   memberId: number | null
 ): Promise<{ error: string } | { groupId: number }> {
   const group = await db.getGroupByToken(token);
-  if (!group) return { error: "This invite link is no longer valid" };
+  if (!group) return { error: "Questo link di invito non è più valido" };
   if (memberId !== null && !group.members.some((m) => m.id === memberId)) {
-    return { error: "That person is not in this group" };
+    return { error: "Quella persona non fa parte di questo gruppo" };
   }
 
   const clientId = await getOrCreateClientId();
@@ -121,6 +175,15 @@ function referencedMemberIds(payers: PayerInput[], splits: SplitInput[]): number
   return [...payers.map((p) => p.memberId), ...splits.map((s) => s.memberId)];
 }
 
+// The date an expense is filed under, as the client sends it. Only the stored
+// shape is accepted -- anything else falls back to "now" rather than being
+// written through, because a malformed timestamp in this column would sort
+// wrongly forever and there is no legitimate client that can produce one.
+function parseSpentAt(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw === "") return undefined;
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? raw : undefined;
+}
+
 export async function addExpense(formData: FormData) {
   const groupId = Number(formData.get("groupId"));
   const description = formData.get("description") as string;
@@ -129,21 +192,32 @@ export async function addExpense(formData: FormData) {
   const splitMode = parseSplitMode(formData.get("splitMode"));
   const splits = parseSplits(formData.get("splits"));
   const category = (formData.get("category") as string) || undefined;
+  const spentAt = parseSpentAt(formData.get("spentAt"));
 
   await assertAccess(groupId);
 
   if (!description || !amountCents || payers.length === 0 || splits.length === 0) {
-    return { error: "All fields are required" };
+    return { error: "Servono tutti i campi" };
   }
   if (!payersAreValid(amountCents, payers)) {
-    return { error: "The paid amounts do not add up to the total" };
+    return { error: "Gli importi pagati non tornano con il totale" };
   }
   if (!splitsAreValid(amountCents, splits)) {
-    return { error: "The split does not add up to the total" };
+    return { error: "La divisione non torna con il totale" };
   }
   await assertMembersInGroup(groupId, referencedMemberIds(payers, splits));
 
-  await db.addExpense(groupId, description, amountCents, payers, splits, splitMode, undefined, category);
+  await db.addExpense(
+    groupId,
+    description,
+    amountCents,
+    payers,
+    splits,
+    splitMode,
+    undefined,
+    category,
+    spentAt
+  );
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -155,23 +229,34 @@ export async function updateExpense(
   payers: PayerInput[],
   splits: SplitInput[],
   splitMode: SplitMode,
-  category?: string
+  category?: string,
+  spentAt?: string
 ) {
   await assertAccess(groupId);
 
   if (!description || !amountCents || payers.length === 0 || splits.length === 0) {
-    return { error: "All fields are required" };
+    return { error: "Servono tutti i campi" };
   }
   if (!payersAreValid(amountCents, payers)) {
-    return { error: "The paid amounts do not add up to the total" };
+    return { error: "Gli importi pagati non tornano con il totale" };
   }
   if (!splitsAreValid(amountCents, splits)) {
-    return { error: "The split does not add up to the total" };
+    return { error: "La divisione non torna con il totale" };
   }
   await assertExpensesInGroup(groupId, [expenseId]);
   await assertMembersInGroup(groupId, referencedMemberIds(payers, splits));
 
-  await db.updateExpense(expenseId, groupId, description, amountCents, payers, splits, splitMode, category);
+  await db.updateExpense(
+    expenseId,
+    groupId,
+    description,
+    amountCents,
+    payers,
+    splits,
+    splitMode,
+    category,
+    parseSpentAt(spentAt)
+  );
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -181,16 +266,32 @@ export async function deleteExpense(expenseId: number, groupId: number) {
   revalidatePath(`/groups/${groupId}`);
 }
 
-export async function addMember(formData: FormData) {
-  const groupId = Number(formData.get("groupId"));
-  const name = formData.get("name") as string;
-  const color = (formData.get("color") as string) || "#C4572A";
-
+// Add somebody to a group that already exists. Until this had a screen to call
+// it, members could only ever be named while creating the group -- so a friend
+// who moved into the flat in September could not be given a share of anything.
+//
+// Explicit union return type, for the reason spelled out on joinGroup above.
+export async function addMember(
+  groupId: number,
+  name: string
+): Promise<{ error: string } | undefined> {
   await assertAccess(groupId);
-  if (!name) return { error: "Name is required" };
 
-  await db.addMember(groupId, name, color);
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Serve un nome" };
+
+  // Two people called "Marco" makes every row in a split ambiguous to read.
+  // Nothing downstream breaks -- members are addressed by id, never by name --
+  // but the person choosing who paid has no way to tell them apart.
+  const existing = await db.getMembers(groupId);
+  if (existing.some((m) => m.name.toLowerCase() === trimmed.toLowerCase())) {
+    return { error: "C'è già qualcuno con questo nome" };
+  }
+
+  await db.addMember(groupId, trimmed);
   revalidatePath(`/groups/${groupId}`);
+  // The homepage row counts members too.
+  revalidatePath("/");
 }
 
 export async function createExpensesFromReceipt(
@@ -205,9 +306,13 @@ export async function createExpensesFromReceipt(
   category?: string,
   // What the paper said the total was, as the parser read it. Kept so that
   // "did this scan reconcile?" stays answerable after the review screen closes.
-  declaredTotalCents?: number
+  declaredTotalCents?: number,
+  // The day on the receipt. Applied to every line, so the shop stays one thing
+  // in the list instead of scattering across the day it happened to be scanned.
+  spentAt?: string
 ) {
   await assertAccess(groupId);
+  const day = parseSpentAt(spentAt);
 
   const receiptId = crypto.randomUUID();
   const name = receiptName?.trim() || undefined;
@@ -224,14 +329,18 @@ export async function createExpensesFromReceipt(
   for (let k = 0; k < valid.length; k++) {
     const item = valid[k];
     const { splits } = computeSplits("equal", item.priceCents, item.splitMemberIds, {});
-    await db.addExpense(groupId, item.name, item.priceCents, payersByLine[k], splits, "equal", receiptId, category);
+    await db.addExpense(
+      groupId,
+      item.name,
+      item.priceCents,
+      payersByLine[k],
+      splits,
+      "equal",
+      receiptId,
+      category,
+      day
+    );
   }
-  revalidatePath(`/groups/${groupId}`);
-}
-
-export async function renameReceipt(receiptId: string, name: string, groupId: number) {
-  await assertAccess(groupId);
-  await db.renameReceipt(receiptId, name.trim(), groupId);
   revalidatePath(`/groups/${groupId}`);
 }
 
@@ -248,14 +357,19 @@ export async function saveReceipt(
   items: { id?: number; name: string; priceCents: number; splitMemberIds: number[]; category?: string }[],
   originalIds: number[],
   // One category for the whole shop, applied to each of its lines.
-  category?: string
+  category?: string,
+  // One date for the whole shop, likewise. Omitted keeps the day the receipt
+  // already has -- which is also what a line added here inherits, so a forgotten
+  // item added to July's shop does not file itself under today.
+  spentAt?: string
 ) {
   await assertAccess(groupId);
+  const day = parseSpentAt(spentAt) ?? (await db.getReceiptSpentAt(receiptId, groupId));
 
-  if (payers.length === 0) return { error: "Select who paid" };
+  if (payers.length === 0) return { error: "Scegli chi ha pagato" };
 
   const valid = items.filter((i) => i.name.trim() && i.priceCents > 0 && i.splitMemberIds.length > 0);
-  if (valid.length === 0) return { error: "Add at least one item" };
+  if (valid.length === 0) return { error: "Aggiungi almeno una voce" };
 
   await assertMembersInGroup(groupId, [
     ...payers.map((p) => p.memberId),
@@ -274,10 +388,10 @@ export async function saveReceipt(
     const { splits } = computeSplits("equal", item.priceCents, item.splitMemberIds, {});
     const itemPayers = payersByLine[k];
     if (item.id) {
-      await db.updateExpense(item.id, groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", item.category);
+      await db.updateExpense(item.id, groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", item.category, day);
       kept.add(item.id);
     } else {
-      await db.addExpense(groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", receiptId, item.category);
+      await db.addExpense(groupId, item.name.trim(), item.priceCents, itemPayers, splits, "equal", receiptId, item.category, day);
     }
   }
 
@@ -318,7 +432,7 @@ export async function addShoppingItem(formData: FormData) {
   const addedByMemberId = formData.get("addedByMemberId") ? Number(formData.get("addedByMemberId")) : null;
 
   await assertAccess(groupId);
-  if (!name) return { error: "Name is required" };
+  if (!name) return { error: "Serve un nome" };
   if (addedByMemberId !== null) await assertMembersInGroup(groupId, [addedByMemberId]);
 
   await db.addShoppingItem(groupId, name, quantity, addedByMemberId);

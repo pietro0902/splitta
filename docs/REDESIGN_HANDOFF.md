@@ -1,39 +1,44 @@
 # Splitta redesign — handoff
 
-_Written 2026-07-30, at commit `7692eea`. Everything below was designed as
-rendered mockups in a chat session that no longer exists; this file is the only
-record. Treat it as the specification, not as notes._
+_Written 2026-07-30, at commit `7692eea`, as the specification for a redesign
+that had not been started. **Updated 2026-07-30 (later the same day): it has
+been. §1 records what was decided and §7 what shipped; §§2–5 remain the
+specification the implementation follows.**_
 
 ---
 
-## 1. Two decisions block writing any code
+## 1. The decisions, answered
 
-Do not start implementing until these are answered. They were still open when
-the session ended.
+**The logo mark: a receipt knocked out of a filled cyan tile.** Chosen over the
+folded banknote that was the standing proposal — the receipt is what the app
+actually does (the scanner is the reason it exists), and a full-bleed tile
+survives being a 22px icon where a line-drawn note turns to mush. Pietro's words
+were that he would still prefer something with a banknote in it, so this is
+settled but not closed; the idea worth trying next is the same silhouette read
+*as* a banknote, keeping the notched hem.
 
-**Which logo mark.** The last proposal on the table was a *folded banknote
-knocked out as negative space inside a filled tile* — the tile bleeds to the
-edge and the shape you recognise is the void. It combined the two variants that
-survived: a folded-banknote silhouette (unmistakable at any size, and the only
-way to get depth in a system with no gradients or shadows) and a full-bleed
-negative cut (maximum impact as a home-screen icon, but says nothing about
-money on its own).
+The geometry lives in exactly two places and they must be changed together:
+`mark()` in `scripts/generate-icons.mjs` (then `npm run icons`) and
+`src/components/brand-mark.tsx`.
 
 Rejected, do not revisit: **any "split S"**. A whole family of them — diagonal
 slice, centre gap, split serif, division sign, uneven shares, torn edge — was
 shown and dismissed as uninteresting. Also weak: two offset rectangles (a
-rectangle is the least recognisable shape there is, and the banknote reading
-dies at 22px) and the Venn-diagram pair (already the logo of many things).
+rectangle is the least recognisable shape there is) and the Venn-diagram pair
+(already the logo of many things). A split coin was shown alongside the receipt
+and lost, though it was the most distinctive of the four.
 
-**Dark-only, or light and dark.** Ghiaccio is designed dark-first. Shipping
-dark-only halves the work and makes the app sharper; keeping both preserves
-usability in daylight, which matters because this app gets used outdoors, at
-tables, in the sun. The app currently has `next-themes` with both.
+**Light and dark, both.** Dark-only was the cheaper option and was not taken:
+the app gets used outdoors, at tables, in the sun, and the point of the
+redesign is the UX changes in §3, which are wasted on a screen nobody can read
+in daylight. The cost is real and worth stating — `#5EE6E6` fails contrast on
+white, so in the light theme the brand cyan *changes colour* to `#0C8891`. It
+is kept cheap by one rule: **components use semantic tokens only, never a
+hand-written colour**. Follow that and the light theme keeps coming for free.
 
-A third, smaller decision rides along: the current display face is **Instrument
-Serif**, which does not belong in Ghiaccio. Recommendation is to drop it, set
-everything in a tight grotesk, and use **Geist Mono** (already a dependency)
-for every tabular figure — balances, amounts, columns.
+**Instrument Serif is gone.** Everything is Geist, with Geist Mono on every
+figure via the `.figure` utility. `--font-display` survives as an alias so
+`font-heading` still resolves.
 
 ---
 
@@ -54,7 +59,8 @@ otherwise would.
 ### Tokens
 
 Values are taken from the approved mockups. They are the dark theme; the light
-counterpart does not exist yet and depends on decision 2.
+counterpart is derived from them and lives beside them in
+`src/app/globals.css`.
 
 | Role | Value |
 |---|---|
@@ -174,10 +180,11 @@ member pills with the selected one ringed in accent, and `DIVISO TRA` — with
 the live per-head figure on the same line — over a 4-way segmented control
 (Equamente / Importi / % / Quote). Accent pill to confirm.
 
-**Not designed, and it exists:** multiple payers with different amounts. The
-mockup shows a single-payer pill row. The real flow needs a second state where
-tapping a second person reveals per-payer amount fields. Design it before
-building.
+**Multiple payers with different amounts** was called out here as designed
+nowhere and existing anyway. It is now drawn as the second state it always was
+in the code: tapping one person is a row of pills and nothing else, tapping a
+second reveals the per-payer amount fields under them, with "torna" / "restano
+€X" on the label line. See `src/components/payer-editor.tsx`.
 
 ### Receipt review
 
@@ -209,23 +216,66 @@ in place.
 
 ---
 
-## 6. Suggested order
+## 6. What shipped, and what did not
 
-1. Answer the two decisions in §1.
-2. Tokens in `src/app/globals.css`, both themes if decision 2 says so.
-3. The new cross-group balance query, then the homepage — highest visible
-   payoff, and it proves the identity plumbing end to end.
-4. Group detail: hero card, tabs, then the expense list. This is where the
-   §2 structural rule earns its keep; if the list looks crowded, the rule is
-   being broken.
-5. The two sheets — add expense (including the multi-payer state) and receipt
-   review.
-6. Balances, settle, shopping, analytics, empty states.
-7. Regenerate the icons: change `mark()` in `scripts/generate-icons.mjs` and
-   run `npm run icons`. The current mark is a deliberate placeholder in the old
-   terracotta and must not survive the redesign. Update `theme_color` and
-   `background_color` in `src/app/manifest.ts` to the Ghiaccio values at the
-   same time, and the `viewport.themeColor` pair in `src/app/layout.tsx`.
+Everything in §§2–5 is implemented: tokens in both themes, the cross-group
+balance query, the homepage, group detail, the expense list, both sheets,
+balances, settle, shopping, analytics, empty states, and the icons.
+
+Things landed that this document did not ask for, each because the redesign
+made the existing behaviour visibly wrong:
+
+- **The UI is in Italian**, including the user-facing strings in `splits.ts`,
+  `payers.ts` and the `{ error }` returns in `actions.ts`. Every screen in §4 is
+  specified in Italian and the users are Italian; leaving the interface in
+  English would have meant translating the spec back.
+- **Money displays with a comma.** `€89.63` reads as a typo in Italian. The
+  change is inside `formatMoney` only — `formatAmount` feeds
+  `<input type="number">`, whose value must stay dot-decimal or the browser
+  treats the field as empty.
+- **Analytics counts entries, not rows.** The "Spese" card ran
+  `expenses.length`, so it read 269 where the list below it showed 123, and
+  dragged the average down by the same factor. It uses `countExpenseEntries`
+  now, like everything else that counts.
+- **The shopping list records who added an item.** The action had always
+  accepted and validated `addedByMemberId`; no caller ever sent it, so every row
+  rendered "l'ha aggiunto …" against a null name.
+- **`eslint` was dying of an out-of-memory error** before it reached `src`,
+  because nothing ignored `.open-next` (~1400 generated files). The project's
+  only automated check was silently doing nothing. Fixed in
+  `eslint.config.mjs`.
+- **You can add somebody to a group that already exists.** The `addMember`
+  action had been there, protected, with nothing calling it, so members could
+  only ever be named at creation time. The form lives under the balance list —
+  the one screen that already answers "who is in this group" — and the server
+  picks the colour (first shade the group is not using) and rejects a duplicate
+  name. `renameReceipt`, dead for the opposite reason (`saveReceipt` already
+  writes the name), was deleted along with `expense-chart.tsx`.
+
+Found in the pre-push review of the redesign itself, and fixed:
+
+- **The reconciliation tolerance was owned by the scanner alone.** The list and
+  the receipt editor compared exactly, so a scan the scanner had accepted at one
+  cent of slack came back permanently flagged as broken. `receiptReconciles` in
+  `src/lib/receipts.ts` is now the single answer for all three surfaces.
+- **The light theme failed WCAG AA.** `#0C8891` measured 3.8:1 as text on
+  `--brand-field`, which is where accent text mostly lives. Both `--primary` and
+  `--positive` were darkened; every pair the interface actually renders now
+  measures ≥ 4.5:1 in both themes.
+- **A net balance of zero was reported as "Sei in pari"** even when it was
+  €100 owed in one group cancelling €100 owing in another — two payments still
+  to make. That case now reads "In pari nel totale".
+
+Open, and deliberately not invented:
+
+- **"Aggiungi spesa" on the homepage.** §4 puts an accent pill there, but an
+  expense needs a group and the homepage has none selected. The pill is
+  **"Nuovo gruppo"** instead. Picking a group first is a flow nobody has
+  designed.
+- **Group emoji survived.** §2 replaced them with coloured monograms; they are
+  kept, inside the tinted tile the monogram would have used, because users
+  chose them by hand. The monogram is the fallback when there is no emoji.
+- **The mark is settled but not closed** — see §1.
 
 There is no test suite and no CI, so `npm run lint` and `npm run build` are the
 only automated safety net; `npm run check:parser` covers the receipt parser.

@@ -2,11 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { Users, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { MemberAvatar } from "@/components/member-avatar";
+import { BrandMark } from "@/components/brand-mark";
 import { joinGroup } from "@/lib/actions";
-import { Button } from "@/components/ui/button";
 import type { Group, Member } from "@/lib/db-types";
 
 type GroupWithMembers = Group & { members: Member[] };
@@ -40,62 +39,57 @@ export function InviteClient({
   }
 
   return (
-    <div className="relative flex flex-col flex-1">
-      <main className="flex-1 flex items-center justify-center px-5 py-12">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="w-full max-w-sm"
-        >
-          <div className="rounded-3xl border border-border bg-card p-8 shadow-2xl text-center">
-            <span className="text-5xl mb-4 block">{group.emoji}</span>
-            <h1 className="font-heading text-2xl font-bold mb-1">{group.name}</h1>
-            <p className="text-sm text-muted-foreground mb-8">
-              {group.members.length} members
+    <div className="flex flex-1 flex-col">
+      <header className="flex items-center gap-2.5 px-5 py-4">
+        <BrandMark size={26} className="text-primary" />
+        <span className="text-[17px] font-medium tracking-[-0.02em]">Splitta</span>
+      </header>
+
+      <main className="flex flex-1 items-center justify-center px-5 pb-16">
+        <div className="w-full max-w-sm">
+          <div className="rounded-[22px] border border-border bg-raised p-6 text-center">
+            <span className="mb-3 block text-4xl">{group.emoji}</span>
+            <h1 className="text-xl font-medium">{group.name}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {group.members.length === 1 ? "1 membro" : `${group.members.length} membri`}
             </p>
 
             {alreadyJoined ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-center gap-2 text-primary">
-                  <Check className="size-5" />
-                  <span className="font-medium">Already in your groups</span>
+              <div className="mt-7 space-y-4">
+                <div className="flex items-center justify-center gap-2 text-positive">
+                  <Check className="size-4.5" />
+                  <span className="text-sm">Sei già in questo gruppo</span>
                 </div>
-                <Button
+                <button
                   onClick={() => router.push(`/groups/${group.id}`)}
-                  className="w-full h-12 rounded-xl text-base font-semibold"
+                  className="flex h-12 w-full items-center justify-center rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
                 >
-                  Go to group
-                </Button>
+                  Vai al gruppo
+                </button>
               </div>
             ) : (
-              <div className="space-y-5">
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground flex items-center justify-center gap-1.5 mb-4">
-                    <Users className="size-3.5" />
-                    Who are you?
-                  </label>
-                  <div className="grid gap-2">
-                    {group.members.map((m) => (
-                      <motion.button
-                        key={m.id}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={() => handleJoin(m.id)}
-                        disabled={isPending}
-                        className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left font-medium bg-muted/50 hover:bg-primary/10 hover:ring-2 hover:ring-primary transition-all disabled:opacity-50"
-                      >
-                        <MemberAvatar name={m.name} color={m.color} size="md" />
-                        <span>{m.name}</span>
-                      </motion.button>
-                    ))}
-                  </div>
+              <div className="mt-7">
+                <p className="mb-3 text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                  Chi sei?
+                </p>
+                <div className="grid gap-2">
+                  {group.members.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleJoin(m.id)}
+                      disabled={isPending}
+                      className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left text-sm transition-colors hover:border-primary disabled:opacity-50"
+                    >
+                      <MemberAvatar name={m.name} color={m.color} size="md" />
+                      <span>{m.name}</span>
+                    </button>
+                  ))}
                 </div>
-                {error && <p className="text-sm text-destructive">{error}</p>}
+                {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
               </div>
             )}
           </div>
-        </motion.div>
+        </div>
       </main>
     </div>
   );

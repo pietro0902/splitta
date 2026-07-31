@@ -19,10 +19,10 @@ export type SplitMode = "equal" | "exact" | "percent" | "shares";
 export type SplitInput = { memberId: number; amount: number; weight: number | null };
 
 export const SPLIT_MODES: { id: SplitMode; label: string; hint: string }[] = [
-  { id: "equal", label: "Equally", hint: "Same share for everyone" },
-  { id: "exact", label: "Amounts", hint: "Enter exact euro amounts" },
-  { id: "percent", label: "Percent", hint: "Split by percentage" },
-  { id: "shares", label: "Shares", hint: "Split by parts (e.g. 2 vs 1)" },
+  { id: "equal", label: "Equamente", hint: "Stessa quota per tutti" },
+  { id: "exact", label: "Importi", hint: "Importi esatti in euro" },
+  { id: "percent", label: "%", hint: "Dividi in percentuale" },
+  { id: "shares", label: "Quote", hint: "Dividi in parti (es. 2 contro 1)" },
 ];
 
 // Percentages are still floats -- they are not money -- so comparing them to
@@ -107,8 +107,8 @@ export function computeSplits(
     error: null,
   };
 
-  if (!totalCents || totalCents <= 0) return { ...base, error: "Enter an amount first" };
-  if (memberIds.length === 0) return { ...base, error: "Pick at least one person" };
+  if (!totalCents || totalCents <= 0) return { ...base, error: "Inserisci prima un importo" };
+  if (memberIds.length === 0) return { ...base, error: "Scegli almeno una persona" };
 
   if (mode === "equal") {
     const splits = distribute(totalCents, memberIds.map((id) => ({ memberId: id, raw: 1 }))).map(
@@ -133,8 +133,8 @@ export function computeSplits(
       error: valid
         ? null
         : remaining > 0
-          ? `${formatMoney(remaining)} left to assign`
-          : `${formatMoney(-remaining)} over`,
+          ? `restano ${formatMoney(remaining)}`
+          : `${formatMoney(-remaining)} di troppo`,
     };
   }
 
@@ -151,7 +151,11 @@ export function computeSplits(
       valid,
       percentAssigned,
       percentRemaining,
-      error: valid ? null : percentRemaining > 0 ? `${percentRemaining.toFixed(1)}% left` : `${Math.abs(percentRemaining).toFixed(1)}% over`,
+      error: valid
+        ? null
+        : percentRemaining > 0
+          ? `manca ${percentRemaining.toFixed(1)}%`
+          : `${Math.abs(percentRemaining).toFixed(1)}% di troppo`,
     };
   }
 
@@ -161,7 +165,7 @@ export function computeSplits(
     memberIds.map((id) => ({ memberId: id, raw: weights[id] ?? 1 }))
   );
   const valid = splits.length > 0;
-  return { ...base, splits, valid, assigned: totalCents, remaining: 0, error: valid ? null : "Give someone at least one share" };
+  return { ...base, splits, valid, assigned: totalCents, remaining: 0, error: valid ? null : "Dai almeno una quota a qualcuno" };
 }
 
 // Convert the editor's raw string inputs into the numeric weight map

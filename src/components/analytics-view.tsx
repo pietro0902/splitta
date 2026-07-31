@@ -11,13 +11,34 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
-import { MemberAvatar, MemberAvatarStack } from "@/components/member-avatar";
+import { MemberAvatar } from "@/components/member-avatar";
 import { CURRENCY, formatMoney } from "@/lib/money";
-import { entryAmountCents, groupExpenses, receiptPayers } from "@/lib/receipts";
+import { tintField } from "@/lib/tints";
+import { expenseDate, parseStored } from "@/lib/dates";
+import {
+  countExpenseEntries,
+  entryAmountCents,
+  groupExpenses,
+  receiptPayers,
+} from "@/lib/receipts";
 import type { Member, Expense } from "@/lib/db-types";
 
 function payerSummary(payers: Expense["payers"]): string {
-  return payers.map((p) => p.member_name).join(" & ");
+  return payers.map((p) => p.member_name).join(" e ");
+}
+
+const TOOLTIP_STYLE = {
+  borderRadius: "12px",
+  border: "1px solid var(--border)",
+  backgroundColor: "var(--popover)",
+  color: "var(--popover-foreground)",
+  fontSize: "13px",
+} as const;
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-3 text-xs uppercase tracking-[0.08em] text-muted-foreground">{children}</h3>
+  );
 }
 
 export function AnalyticsView({
@@ -29,10 +50,11 @@ export function AnalyticsView({
 }) {
   if (expenses.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <p className="text-4xl mb-3">📊</p>
-        <p className="font-medium">No data yet</p>
-        <p className="text-sm mt-1">Add expenses to see analytics</p>
+      <div className="rounded-2xl border border-border bg-raised px-5 py-10 text-center">
+        <p className="font-medium">Ancora niente da mostrare</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Aggiungi qualche spesa e qui compaiono i numeri.
+        </p>
       </div>
     );
   }
@@ -41,7 +63,11 @@ export function AnalyticsView({
   // used to follow each one is gone. Only the average needs rounding, being the
   // one figure here that isn't a sum.
   const total = expenses.reduce((s, e) => s + e.amount_cents, 0);
-  const avg = Math.round(total / expenses.length);
+  // Entries, not rows: a receipt is one expense that happens to be stored as N.
+  // Counting rows made this card read 269 while the list below it showed 123,
+  // and dragged the average down by the same factor.
+  const count = countExpenseEntries(expenses);
+  const avg = Math.round(total / count);
 
   // Spending per member (who paid)
   const paidByMember = members.map((m) => {
@@ -64,7 +90,9 @@ export function AnalyticsView({
   // Spending over time (by day)
   const byDay = new Map<string, number>();
   for (const e of expenses) {
-    const day = new Date(e.created_at + "Z").toLocaleDateString("en-GB", {
+    // The day it was spent, not the day it was typed: otherwise a week of
+    // receipts entered on Sunday evening reads as one enormous Sunday.
+    const day = parseStored(expenseDate(e)).toLocaleDateString("it-IT", {
       day: "2-digit",
       month: "short",
     });
@@ -88,7 +116,7 @@ export function AnalyticsView({
           }
         : {
             key: `r${entry.receiptId}`,
-            label: entry.expenses[0].receipt_name || "Receipt",
+            label: entry.expenses[0].receipt_name || "Scontrino",
             payers: receiptPayers(entry.expenses),
             amount: entryAmountCents(entry),
           }
@@ -96,32 +124,29 @@ export function AnalyticsView({
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5);
 
-  // Pie data for who paid
   const pieData = paidByMember.filter((d) => d.amount > 0);
 
   return (
     <div className="space-y-8">
-      {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border border-border bg-card p-4 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Total</p>
-          <p className="font-heading text-lg font-bold tabular-nums">{formatMoney(total)}</p>
+      <div className="grid grid-cols-3 gap-2.5">
+        <div className="rounded-xl border border-border bg-card p-3.5 text-center">
+          <p className="mb-1 text-xs text-muted-foreground">Totale</p>
+          <p className="figure text-[17px] font-medium">{formatMoney(total)}</p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Expenses</p>
-          <p className="font-heading text-lg font-bold tabular-nums">{expenses.length}</p>
+        <div className="rounded-xl border border-border bg-card p-3.5 text-center">
+          <p className="mb-1 text-xs text-muted-foreground">Spese</p>
+          <p className="figure text-[17px] font-medium">{count}</p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Average</p>
-          <p className="font-heading text-lg font-bold tabular-nums">{formatMoney(avg)}</p>
+        <div className="rounded-xl border border-border bg-card p-3.5 text-center">
+          <p className="mb-1 text-xs text-muted-foreground">Media</p>
+          <p className="figure text-[17px] font-medium">{formatMoney(avg)}</p>
         </div>
       </div>
 
-      {/* Who paid - Pie chart */}
       {pieData.length > 0 && (
         <div>
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Who paid</h3>
-          <div className="h-48">
+          <SectionTitle>Chi ha pagato</SectionTitle>
+          <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -140,60 +165,50 @@ export function AnalyticsView({
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value) => [formatMoney(Number(value)), "Paid"]}
+                  formatter={(value) => [formatMoney(Number(value)), "ha pagato"]}
                   labelFormatter={(_, payload) => payload[0]?.payload?.member?.name ?? ""}
-                  contentStyle={{
-                    borderRadius: "12px",
-                    border: "1px solid var(--border)",
-                    backgroundColor: "var(--card)",
-                    fontSize: "13px",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                  }}
+                  contentStyle={TOOLTIP_STYLE}
                 />
               </PieChart>
             </ResponsiveContainer>
-            <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-1">
-              {pieData.map((d) => (
-                <div key={d.member.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <div className="size-2.5 rounded-full" style={{ backgroundColor: d.member.color }} />
-                  {d.member.name}: {formatMoney(d.amount)}
-                </div>
-              ))}
-            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
+            {pieData.map((d) => (
+              <div key={d.member.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="size-2.5 rounded-full" style={{ backgroundColor: d.member.color }} />
+                {d.member.name}: <span className="figure">{formatMoney(d.amount)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Cost per person */}
       <div>
-        <h3 className="text-sm font-medium text-muted-foreground mb-3">Cost per person</h3>
+        <SectionTitle>Quanto è costato a ciascuno</SectionTitle>
         <div className="space-y-2">
           {costByMember.map((d) => {
             const pct = total > 0 ? (d.amount / total) * 100 : 0;
             return (
               <div key={d.member.id} className="flex items-center gap-3">
                 <MemberAvatar name={d.member.name} color={d.member.color} size="sm" />
-                <span className="text-sm font-medium w-20 truncate">{d.member.name}</span>
-                <div className="flex-1 h-6 rounded-lg bg-muted/50 overflow-hidden">
+                <span className="w-20 truncate text-sm">{d.member.name}</span>
+                <div className="h-5 flex-1 overflow-hidden rounded-lg bg-muted">
                   <div
-                    className="h-full rounded-lg transition-all"
-                    style={{ width: `${pct}%`, backgroundColor: d.member.color, opacity: 0.7 }}
+                    className="h-full rounded-lg"
+                    style={{ width: `${pct}%`, backgroundColor: tintField(d.member.color, 55) }}
                   />
                 </div>
-                <span className="text-sm font-heading font-bold tabular-nums w-20 text-right">
-                  {formatMoney(d.amount)}
-                </span>
+                <span className="figure w-20 text-right text-sm">{formatMoney(d.amount)}</span>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Daily spending bar chart */}
       {dailyData.length > 1 && (
         <div>
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Spending over time</h3>
-          <div className="h-48">
+          <SectionTitle>Spesa nel tempo</SectionTitle>
+          <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={dailyData}>
                 <XAxis
@@ -211,14 +226,9 @@ export function AnalyticsView({
                   width={50}
                 />
                 <Tooltip
-                  formatter={(value) => [formatMoney(Number(value)), "Spent"]}
-                  contentStyle={{
-                    borderRadius: "12px",
-                    border: "1px solid var(--border)",
-                    backgroundColor: "var(--card)",
-                    fontSize: "13px",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                  }}
+                  formatter={(value) => [formatMoney(Number(value)), "speso"]}
+                  cursor={{ fill: "var(--muted)" }}
+                  contentStyle={TOOLTIP_STYLE}
                 />
                 <Bar dataKey="amount" fill="var(--primary)" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -227,22 +237,17 @@ export function AnalyticsView({
         </div>
       )}
 
-      {/* Top expenses */}
       <div>
-        <h3 className="text-sm font-medium text-muted-foreground mb-3">Top expenses</h3>
-        <div className="space-y-2">
+        <SectionTitle>Le spese più grandi</SectionTitle>
+        <div className="divide-y divide-hairline">
           {topExpenses.map((e, i) => (
-            <div
-              key={e.key}
-              className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-            >
-              <span className="text-sm font-bold text-muted-foreground w-5">{i + 1}</span>
-              <MemberAvatarStack members={e.payers.map((p) => ({ name: p.member_name, color: p.member_color }))} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{e.label}</p>
-                <p className="text-xs text-muted-foreground">{payerSummary(e.payers)}</p>
+            <div key={e.key} className="flex items-center gap-3 py-2.5">
+              <span className="figure w-4 text-sm text-muted-foreground">{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm">{e.label}</p>
+                <p className="truncate text-xs text-muted-foreground">{payerSummary(e.payers)}</p>
               </div>
-              <p className="font-heading font-bold tabular-nums">{formatMoney(e.amount)}</p>
+              <p className="figure text-sm">{formatMoney(e.amount)}</p>
             </div>
           ))}
         </div>

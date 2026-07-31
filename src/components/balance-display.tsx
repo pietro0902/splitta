@@ -1,58 +1,55 @@
-"use client";
-
-import { motion } from "framer-motion";
 import { MemberAvatar } from "@/components/member-avatar";
 import { formatMoney } from "@/lib/money";
 import type { Member } from "@/lib/db-types";
 
 type BalanceData = { member: Member; balance_cents: number };
 
-export function BalanceDisplay({ balances }: { balances: BalanceData[] }) {
+// Mint and coral come from the theme, not from Tailwind's emerald/rose: the
+// direction gives "you are owed" and "you owe" their own two colours, and the
+// brand cyan deliberately means neither.
+export function BalanceDisplay({
+  balances,
+  myMemberId = null,
+}: {
+  balances: BalanceData[];
+  myMemberId?: number | null;
+}) {
   if (balances.length === 0) return null;
   const maxAbs = Math.max(...balances.map((b) => Math.abs(b.balance_cents)), 1);
 
   return (
-    <div className="space-y-3">
-      {balances.map((b, i) => {
-        const pct = Math.abs(b.balance_cents) / maxAbs;
-        const isPositive = b.balance_cents > 0;
-        const isNegative = b.balance_cents < 0;
+    <div className="space-y-3.5">
+      {balances.map((b) => {
+        const pct = (Math.abs(b.balance_cents) / maxAbs) * 100;
+        const positive = b.balance_cents > 0;
+        const settled = b.balance_cents === 0;
         return (
-          <motion.div
-            key={b.member.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="flex items-center gap-3"
-          >
+          <div key={b.member.id} className="flex items-center gap-3">
             <MemberAvatar name={b.member.name} color={b.member.color} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium truncate">{b.member.name}</span>
+            <div className="min-w-0 flex-1">
+              <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                <span className="truncate text-sm">
+                  {b.member.name}
+                  {b.member.id === myMemberId && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">tu</span>
+                  )}
+                </span>
                 <span
-                  className={`text-sm font-heading font-bold tabular-nums ${
-                    isPositive ? "text-emerald-600 dark:text-emerald-400" : isNegative ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"
+                  className={`figure shrink-0 text-sm ${
+                    settled ? "text-muted-foreground" : positive ? "text-positive" : "text-negative"
                   }`}
                 >
-                  {isPositive ? "+" : ""}{formatMoney(b.balance_cents)}
+                  {settled ? "saldato" : `${positive ? "+" : "−"}${formatMoney(Math.abs(b.balance_cents))}`}
                 </span>
               </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${pct * 100}%` }}
-                  transition={{ delay: i * 0.05 + 0.2, type: "spring", damping: 20 }}
-                  className={`h-full rounded-full ${
-                    isPositive
-                      ? "bg-emerald-500"
-                      : isNegative
-                      ? "bg-rose-500"
-                      : "bg-muted-foreground"
-                  }`}
+              <div className="h-[5px] overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-full rounded-full ${positive ? "bg-positive" : "bg-negative"}`}
+                  style={{ width: settled ? "0%" : `${pct}%` }}
                 />
               </div>
             </div>
-          </motion.div>
+          </div>
         );
       })}
     </div>

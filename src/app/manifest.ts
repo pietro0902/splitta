@@ -12,16 +12,16 @@ import type { MetadataRoute } from "next";
 // silhouette everywhere else.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Splitta — Split expenses with friends",
+    name: "Splitta — Dividi le spese con gli amici",
     short_name: "Splitta",
-    description: "Split shared expenses with your group, scan receipts, and settle up.",
+    description: "Dividi le spese del gruppo, scansiona gli scontrini e chiudi i conti.",
     start_url: "/",
     display: "standalone",
-    background_color: "#FAF7F2",
-    theme_color: "#C4572A",
+    background_color: "#0B0E14",
+    theme_color: "#0B0E14",
     orientation: "portrait",
     categories: ["finance", "productivity", "utilities"],
-    lang: "en",
+    lang: "it",
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },

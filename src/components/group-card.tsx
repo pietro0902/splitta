@@ -1,79 +1,86 @@
 "use client";
 
-import { motion } from "framer-motion";
 import Link from "next/link";
-import { ArrowRight, Trash2 } from "lucide-react";
-import { MemberAvatarStack } from "@/components/member-avatar";
+import { Trash2 } from "lucide-react";
 import { deleteGroup } from "@/lib/actions";
 import { formatMoney } from "@/lib/money";
+import { groupTint, initials } from "@/lib/tints";
 import { useTransition } from "react";
 import type { GroupSummary } from "@/lib/db-types";
 
-export function GroupCard({ group, index }: { group: GroupSummary; index: number }) {
+// A group is a row, not a card: what it leads with is *your* position, because
+// nobody opens this app to ask what the group spent in total. That figure is
+// still here, but it is the fallback for a browser that never said which member
+// it is -- and a group whose balance is unknown says so rather than showing a
+// confident zero.
+//
+// The emoji survives the redesign. The mockups replaced it with a coloured
+// monogram, which is cleaner, but people picked those emoji by hand; this keeps
+// them and puts them in the tinted tile the monogram would have used.
+export function GroupCard({ group }: { group: GroupSummary }) {
   const [isPending, startTransition] = useTransition();
+  const balance = group.myBalanceCents;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.08, type: "spring", damping: 20 }}
-    >
-      <Link href={`/groups/${group.id}`} className="block group">
-        <div className="relative rounded-2xl border border-border bg-card p-5 transition-all hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20 hover:-translate-y-0.5">
-          <div className="flex items-start justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">{group.emoji}</span>
-              <div>
-                <h3 className="font-heading text-lg font-bold group-hover:text-primary transition-colors">
-                  {group.name}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {group.members.length} members
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (
-                  confirm(
-                    `Delete "${group.name}"?\n\nThis erases the group and all its expenses for everyone in it, not just on this device. It can't be undone.`
-                  )
-                ) {
-                  // The access rows cascade with the group, so deleting it
-                  // removes it from every member's homepage, not just this one.
-                  startTransition(() => {
-                    void deleteGroup(group.id);
-                  });
-                }
-              }}
-              disabled={isPending}
-              aria-label={`Delete ${group.name}`}
-              // Visible by default; only pointer devices get the hover reveal.
-              // Tailwind compiles `hover:` inside @media (hover: hover), so a
-              // plain `opacity-0 group-hover:opacity-100` is permanently
-              // invisible on touch — which hid this button on phones entirely.
-              className="opacity-100 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all disabled:opacity-50"
-            >
-              <Trash2 className="size-4" />
-            </button>
-          </div>
-
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Total spent</p>
-              <p className="font-heading text-2xl font-bold tabular-nums">
+    <div className="group relative flex items-center gap-3 rounded-xl border border-border bg-card pr-2 transition-colors hover:border-brand-border">
+      <Link href={`/groups/${group.id}`} className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-3">
+        <span
+          className="flex size-10 shrink-0 items-center justify-center rounded-xl text-base font-medium"
+          style={groupTint(group.name)}
+        >
+          {group.emoji || initials(group.name)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] leading-tight">{group.name}</span>
+          <span className="block text-xs text-muted-foreground">
+            {group.members.length === 1 ? "1 membro" : `${group.members.length} membri`}
+          </span>
+        </span>
+        <span className="shrink-0 text-right">
+          {balance === null ? (
+            <>
+              <span className="figure block text-sm text-muted-foreground">
                 {formatMoney(group.totalExpensesCents)}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <MemberAvatarStack members={group.members} />
-              <ArrowRight className="size-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-            </div>
-          </div>
-        </div>
+              </span>
+              <span className="block text-[11px] text-muted-foreground">totale</span>
+            </>
+          ) : balance === 0 ? (
+            <span className="block text-sm text-muted-foreground">saldato</span>
+          ) : (
+            <>
+              <span
+                className={`figure block text-sm font-medium ${balance > 0 ? "text-positive" : "text-negative"}`}
+              >
+                {balance > 0 ? "+" : "−"}
+                {formatMoney(Math.abs(balance))}
+              </span>
+              <span className="block text-[11px] text-muted-foreground">
+                {balance > 0 ? "ti devono" : "devi"}
+              </span>
+            </>
+          )}
+        </span>
       </Link>
-    </motion.div>
+      <button
+        onClick={() => {
+          if (
+            confirm(
+              `Eliminare "${group.name}"?\n\nCancella il gruppo e tutte le sue spese per chiunque ne faccia parte, non solo su questo dispositivo. Non si può annullare.`
+            )
+          ) {
+            // The access rows cascade with the group, so deleting it removes it
+            // from every member's homepage, not just this one.
+            startTransition(() => {
+              void deleteGroup(group.id);
+            });
+          }
+        }}
+        disabled={isPending}
+        aria-label={`Elimina ${group.name}`}
+        className="shrink-0 rounded-lg p-2 text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+      >
+        <Trash2 className="size-4" />
+      </button>
+    </div>
   );
 }
