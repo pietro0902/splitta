@@ -89,7 +89,11 @@ export function GroupList({ groups }: { groups: GroupSummary[] }) {
       <h2 className="mt-7 mb-2.5 text-xs uppercase tracking-[0.08em] text-muted-foreground">
         I tuoi gruppi
       </h2>
-      <div className="grid gap-2">
+      {/* Two columns on a wide screen. The rail already lists these, so the
+          point of repeating them here is that each row carries a figure and a
+          member count the rail has no room for -- one is navigation, this is an
+          overview. */}
+      <div className="grid gap-2 lg:grid-cols-2 lg:gap-3">
         {groups.map((group) => (
           <GroupCard key={group.id} group={group} />
         ))}

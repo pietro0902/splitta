@@ -12,6 +12,17 @@ import { parseMoney } from "@/lib/money";
 // Server actions are ordinary HTTP endpoints and group ids are sequential
 // integers, so without it any caller can address any record in the database.
 
+// Every screen lives under the (app) layout, and that layout carries the
+// sidebar rail — which shows a balance for *every* group. So a payment recorded
+// inside group 42 changes what is on screen for group 7 as well, and
+// invalidating `/groups/42` alone left the rail (and the homepage headline)
+// showing figures from before the edit. The layout is the honest granularity,
+// and it costs nothing to be broad here: every route is `force-dynamic`, so
+// there is no server cache to throw away — only the client's router cache.
+function revalidateApp() {
+  revalidatePath("/", "layout");
+}
+
 function parseSplitMode(raw: FormDataEntryValue | null): SplitMode {
   const value = String(raw ?? "equal");
   return (SPLIT_MODES.some((m) => m.id === value) ? value : "equal") as SplitMode;
@@ -40,7 +51,7 @@ export async function createGroup(formData: FormData) {
 
   const clientId = await getOrCreateClientId();
   const groupId = await db.createGroup(name, emoji, memberNames, clientId, meIndex);
-  revalidatePath("/");
+  revalidateApp();
   return { groupId };
 }
 
@@ -50,14 +61,13 @@ export async function claimMemberIdentity(groupId: number, memberId: number) {
   const clientId = await assertAccess(groupId);
   await assertMembersInGroup(groupId, [memberId]);
   await db.setAccessMember(groupId, clientId, memberId);
-  revalidatePath(`/groups/${groupId}`);
-  revalidatePath("/");
+  revalidateApp();
 }
 
 export async function deleteGroup(groupId: number) {
   await assertAccess(groupId);
   await db.deleteGroup(groupId);
-  revalidatePath("/");
+  revalidateApp();
 }
 
 // Rename a group, or change its emoji. Both were decided once, at creation, and
@@ -73,8 +83,7 @@ export async function updateGroup(
   if (!trimmed) return { error: "Serve un nome" };
 
   await db.updateGroup(groupId, trimmed, emoji.trim() || "👥");
-  revalidatePath(`/groups/${groupId}`);
-  revalidatePath("/");
+  revalidateApp();
 }
 
 // Remove somebody from a group. Refused outright once they have taken part in
@@ -102,8 +111,7 @@ export async function removeMember(
   }
 
   await db.removeMember(groupId, memberId);
-  revalidatePath(`/groups/${groupId}`);
-  revalidatePath("/");
+  revalidateApp();
 }
 
 // Leave a group: drops this browser's access row and nothing else, so the group
@@ -111,7 +119,7 @@ export async function removeMember(
 export async function leaveGroup(groupId: number) {
   const clientId = await assertAccess(groupId);
   await db.revokeAccess(groupId, clientId);
-  revalidatePath("/");
+  revalidateApp();
 }
 
 // Join a group from its invite link. The token is the credential here -- it is
@@ -132,7 +140,7 @@ export async function joinGroup(
 
   const clientId = await getOrCreateClientId();
   await db.grantAccess(group.id, clientId, memberId);
-  revalidatePath("/");
+  revalidateApp();
   return { groupId: group.id };
 }
 
@@ -218,7 +226,7 @@ export async function addExpense(formData: FormData) {
     category,
     spentAt
   );
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function updateExpense(
@@ -257,13 +265,13 @@ export async function updateExpense(
     category,
     parseSpentAt(spentAt)
   );
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function deleteExpense(expenseId: number, groupId: number) {
   await assertAccess(groupId);
   await db.deleteExpense(expenseId, groupId);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 // Add somebody to a group that already exists. Until this had a screen to call
@@ -289,9 +297,9 @@ export async function addMember(
   }
 
   await db.addMember(groupId, trimmed);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
   // The homepage row counts members too.
-  revalidatePath("/");
+  revalidateApp();
 }
 
 export async function createExpensesFromReceipt(
@@ -341,7 +349,7 @@ export async function createExpensesFromReceipt(
       day
     );
   }
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 // Full edit of a scanned receipt: name, payer (applied to every line), and each
@@ -402,7 +410,7 @@ export async function saveReceipt(
   // Name and category belong to the receipt, not to its lines. The declared
   // total is left alone: only a scan can establish it, and this is an edit.
   await db.upsertReceipt(receiptId, groupId, receiptName.trim() || null, category ?? null, null);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function getInviteToken(groupId: number) {
@@ -415,13 +423,13 @@ export async function recordSettlement(groupId: number, fromMemberId: number, to
   await assertAccess(groupId);
   await assertMembersInGroup(groupId, [fromMemberId, toMemberId]);
   await db.recordSettlement(groupId, fromMemberId, toMemberId, amountCents);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function deleteSettlementRecord(id: number, groupId: number) {
   await assertAccess(groupId);
   await db.deleteSettlementRecord(id, groupId);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 // Shopping list
@@ -436,23 +444,23 @@ export async function addShoppingItem(formData: FormData) {
   if (addedByMemberId !== null) await assertMembersInGroup(groupId, [addedByMemberId]);
 
   await db.addShoppingItem(groupId, name, quantity, addedByMemberId);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function toggleShoppingItem(id: number, checked: boolean, groupId: number) {
   await assertAccess(groupId);
   await db.toggleShoppingItem(id, checked, groupId);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function deleteShoppingItem(id: number, groupId: number) {
   await assertAccess(groupId);
   await db.deleteShoppingItem(id, groupId);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }
 
 export async function clearCheckedShoppingItems(groupId: number) {
   await assertAccess(groupId);
   await db.clearCheckedShoppingItems(groupId);
-  revalidatePath(`/groups/${groupId}`);
+  revalidateApp();
 }

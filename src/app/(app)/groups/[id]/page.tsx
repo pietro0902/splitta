@@ -49,28 +49,44 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
   return (
     <div className="relative flex flex-1 flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-2xl items-center gap-2 px-3 py-3 sm:px-5">
+        <div className="mx-auto flex max-w-2xl items-center gap-2 px-3 py-3 sm:px-5 lg:max-w-6xl lg:px-8">
+          {/* Going back is what the rail is for above `lg`. */}
           <Link
             href="/"
             aria-label="Torna ai gruppi"
-            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
           >
             <ChevronLeft className="size-5" />
           </Link>
-          <h1 className="flex min-w-0 flex-1 items-center gap-2 text-[17px] font-medium tracking-[-0.01em]">
+          <h1 className="flex min-w-0 flex-1 items-center gap-2 text-[17px] font-medium tracking-[-0.01em] lg:text-xl">
             <span className="shrink-0">{group.emoji}</span>
             <span className="truncate">{group.name}</span>
           </h1>
+          {/* On a wide screen the two ways of adding money belong up here, next
+              to the group they belong to: a bar pinned to the bottom of a
+              desktop window is a phone habit. */}
+          <div className="hidden shrink-0 items-center gap-2 lg:flex">
+            <AddExpenseForm
+              key={`top-${group.members.map((m) => m.id).join(",")}`}
+              groupId={group.id}
+              members={group.members}
+              compact
+            />
+            <ReceiptScanner groupId={group.id} members={group.members} compact />
+          </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <ShareButton groupId={group.id} inviteToken={group.invite_token} />
             <GroupSettings group={group} members={group.members} myMemberId={myMemberId} />
-            <ThemeToggle />
+            <span className="lg:hidden">
+              <ThemeToggle />
+            </span>
           </div>
         </div>
       </header>
 
-      {/* pb-24 keeps the last row clear of the action bar below. */}
-      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-5 pb-24">
+      {/* pb-24 keeps the last row clear of the action bar below, which only
+          exists under `lg`. */}
+      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-5 pb-24 lg:max-w-6xl lg:px-8 lg:pb-10">
         {myMemberId === null && (
           <IdentityPrompt groupId={group.id} members={group.members} />
         )}
@@ -145,7 +161,7 @@ export default async function GroupPage(props: PageProps<"/groups/[id]">) {
 
       {/* Both ways of adding money sit within thumb reach, above the fold edge,
           instead of at the top where the old form pushed the list down. */}
-      <div className="sticky bottom-0 z-40 border-t border-border bg-background/85 backdrop-blur-xl">
+      <div className="sticky bottom-0 z-40 border-t border-border bg-background/85 backdrop-blur-xl lg:hidden">
         <div className="mx-auto flex max-w-2xl items-center gap-2.5 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="flex-1">
             {/* Keyed on the membership so adding somebody remounts the form.

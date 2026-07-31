@@ -34,9 +34,12 @@ const VISIBLE_LINES = 6;
 export function ReceiptScanner({
   groupId,
   members,
+  // Header variant for `lg` and up; see AddExpenseForm.
+  compact = false,
 }: {
   groupId: number;
   members: Member[];
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
@@ -218,7 +221,9 @@ export function ReceiptScanner({
       <button
         onClick={() => setOpen(true)}
         aria-label="Scansiona uno scontrino"
-        className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-border text-primary transition-colors hover:bg-muted active:translate-y-px"
+        className={`flex shrink-0 items-center justify-center border border-border text-primary transition-colors hover:bg-muted active:translate-y-px ${
+          compact ? "size-9 rounded-xl" : "size-12 rounded-2xl"
+        }`}
       >
         <ScanLine className="size-5" />
       </button>
@@ -237,7 +242,9 @@ export function ReceiptScanner({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 60 }}
               transition={{ type: "spring", damping: 28, stiffness: 320 }}
-              className="max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] border border-border bg-raised p-5 pb-8 sm:max-w-lg sm:rounded-[22px] sm:pb-5"
+              // Wider than the other sheets above `lg`: this is the one screen
+              // with a dozen parsed lines to check against a piece of paper.
+              className="max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] border border-border bg-raised p-5 pb-8 sm:max-w-lg sm:rounded-[22px] sm:pb-5 lg:max-w-2xl"
             >
               <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-border sm:hidden" />
 

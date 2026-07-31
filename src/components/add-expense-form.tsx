@@ -17,9 +17,13 @@ import type { Member } from "@/lib/db-types";
 export function AddExpenseForm({
   groupId,
   members,
+  // The header variant used above `lg`, where this is a button among buttons
+  // rather than the full-width primary action of a phone screen.
+  compact = false,
 }: {
   groupId: number;
   members: Member[];
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -92,7 +96,9 @@ export function AddExpenseForm({
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px"
+        className={`flex items-center justify-center gap-1.5 rounded-full bg-primary font-medium text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px ${
+          compact ? "h-9 px-3.5 text-sm" : "h-12 w-full gap-2 text-[15px]"
+        }`}
       >
         <Plus className="size-4.5 shrink-0" />
         Aggiungi spesa

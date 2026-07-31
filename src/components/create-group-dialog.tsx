@@ -7,7 +7,13 @@ import { Plus, X, UserCheck } from "lucide-react";
 import { createGroup } from "@/lib/actions";
 import { GROUP_EMOJIS } from "@/lib/db-types";
 
-export function CreateGroupDialog() {
+export function CreateGroupDialog({
+  // "rail" is the sidebar's quiet text button; the default is the full-width
+  // accent pill the homepage leads with.
+  variant = "pill",
+}: {
+  variant?: "pill" | "rail";
+} = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -65,9 +71,13 @@ export function CreateGroupDialog() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px"
+        className={
+          variant === "rail"
+            ? "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            : "flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90 active:translate-y-px"
+        }
       >
-        <Plus className="size-4.5" />
+        <Plus className={variant === "rail" ? "size-4" : "size-4.5"} />
         Nuovo gruppo
       </button>
 
